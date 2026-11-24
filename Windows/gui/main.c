@@ -30,6 +30,8 @@
 #include "profile/profile.h"
 #include "loc/loc.h"
 #include "modern/stats_manager.h"
+#include "modern/d2d_renderer.h"
+#include "modern/overlay_dispatcher.h"
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "user32.lib")
@@ -130,6 +132,7 @@ static BOOL      g_reallyExit = FALSE;
 static BOOL      g_started = FALSE;
 
 static PBProfile g_profile;
+static ModernUiConfig g_modernCfg;
 static wchar_t   g_activeProfile[PB_NAME_MAX] = L"Default";
 static BOOL      g_trafficLog = TRUE, g_closeToTray = TRUE;
 static BOOL      g_proxyEnabled = TRUE;   // main switch; not saved: ProxyBridge always starts enabled
@@ -722,6 +725,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         LogStoreInit(&g_actStore,  g_hActLog);
         SetTimer(hwnd, TIMER_LOG, 200, NULL);   // batch log updates ~5x/sec
         StatsManager_Init();
+        ModernUiConfig_Defaults(&g_modernCfg);
+        D2d_Init();
+        OverlayDispatcher_Init(g_hInst, &g_modernCfg);
         SetTimer(hwnd, TIMER_STATS, STATS_POLL_INTERVAL_MS, NULL);
 
         // Menu-bar quick-access icons are drawn on the (non-client) menu bar in WM_NCPAINT;
@@ -1059,7 +1065,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (g_api.Stop) g_api.Stop();
         TrayRemove();
         KillTimer(hwnd, TIMER_STATS);
+        OverlayDispatcher_Shutdown();
         StatsManager_Shutdown();
+        D2d_Shutdown();
         KillTimer(hwnd, TIMER_LOG);
         LogStoreFree(&g_connStore);    // release buffered + pending log lines + the lock
         LogStoreFree(&g_actStore);

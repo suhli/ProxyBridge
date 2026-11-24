@@ -212,11 +212,11 @@ if ($success) {
         # /guard:cf (CFG), /CETCOMPAT (shadow-stack), /LTCG, dead-code strip.
         $guiClArgs = "/nologo /utf-8 /O1 /Os /MT /GL /Gy /GS /guard:cf /sdl /W4 " +
                      "/DNDEBUG /D_CRT_SECURE_NO_WARNINGS /DUNICODE /D_UNICODE " +
-                     "main.c profile\profile.c modern\stats_manager.c app.res " +
+                     "main.c profile\profile.c modern\stats_manager.c modern\d2d_renderer.c modern\rtss_provider.c modern\window_osd.c modern\overlay_dispatcher.c app.res " +
                      "/Fe:ProxyBridge.exe " +
                      "/link /LTCG /SUBSYSTEM:WINDOWS /OPT:REF /OPT:ICF /RELEASE " +
                      "/DYNAMICBASE /HIGHENTROPYVA /NXCOMPAT /guard:cf /CETCOMPAT " +
-                     "user32.lib gdi32.lib comctl32.lib shell32.lib comdlg32.lib winhttp.lib advapi32.lib"
+                     "user32.lib gdi32.lib comctl32.lib shell32.lib comdlg32.lib winhttp.lib advapi32.lib d2d1.lib dwrite.lib dwmapi.lib ole32.lib"
 
         # Sources live in subfolders. rc runs from res\ so app.rc's relative paths
         # (resource.h, app.manifest, logo.ico) resolve; it writes app.res back to gui\.

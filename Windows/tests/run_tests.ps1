@@ -80,9 +80,9 @@ $clUni   = "/utf-8 /DUNICODE /D_UNICODE /D_CRT_SECURE_NO_WARNINGS"
 $clCore  = "/Isrc $wdInc /DPROXYBRIDGE_EXPORTS /D_CRT_SECURE_NO_WARNINGS /D_WINSOCK_DEPRECATED_NO_WARNINGS"
 $lnCore  = "$wdLib WinDivert.lib ws2_32.lib iphlpapi.lib advapi32.lib"
 $lnProf  = 'user32.lib advapi32.lib shell32.lib'
-$lnGui   = '/SUBSYSTEM:CONSOLE /ENTRY:wWinMainCRTStartup user32.lib gdi32.lib comctl32.lib shell32.lib comdlg32.lib winhttp.lib advapi32.lib dwmapi.lib uxtheme.lib ole32.lib uuid.lib'
+$lnGui   = '/SUBSYSTEM:CONSOLE /ENTRY:wWinMainCRTStartup user32.lib gdi32.lib comctl32.lib shell32.lib comdlg32.lib winhttp.lib advapi32.lib dwmapi.lib uxtheme.lib ole32.lib uuid.lib d2d1.lib dwrite.lib'
 $prof    = 'gui\profile\profile.c'
-$stats   = 'gui\modern\stats_manager.c'
+$modern  = @('gui\modern\stats_manager.c', 'gui\modern\d2d_renderer.c', 'gui\modern\rtss_provider.c', 'gui\modern\window_osd.c', 'gui\modern\overlay_dispatcher.c')
 $res     = "$Out\app.res"
 
 # n = name, src = sources, cl = compiler flags, link = linker arguments, ui = needs a desktop session
@@ -99,10 +99,10 @@ $tests = @(
     @{ n='test_dns';             src=@('tests\test_dns.c') + $core;                         cl=$clCore;  link=$lnCore; ui=$false },
     @{ n='test_proxy_protocols'; src=@('tests\test_proxy_protocols.c') + $core;             cl=$clCore;  link=$lnCore; ui=$false },
     @{ n='test_cli';             src=@('tests\test_cli.c');                                 cl="$clPlain /D_WINSOCK_DEPRECATED_NO_WARNINGS /D_WIN32_WINNT=0x0601"; link='winhttp.lib shell32.lib advapi32.lib'; ui=$false },
-    @{ n='test_gui_misc';        src=@('tests\test_gui_misc.c', $prof, $stats);             cl=$clUni;   link=$lnGui;  ui=$false },
-    @{ n='test_rules_ui';        src=@('tests\test_rules_ui.c', $prof, $stats, $res);       cl=$clUni;   link=$lnGui;  ui=$true },
-    @{ n='test_main_ui';         src=@('tests\test_main_ui.c', $prof, $stats, $res);        cl=$clUni;   link=$lnGui;  ui=$true },
-    @{ n='test_dialogs_ui';      src=@('tests\test_dialogs_ui.c', $prof, $stats, $res);     cl=$clUni;   link=$lnGui;  ui=$true }
+    @{ n='test_gui_misc';        src=@('tests\test_gui_misc.c', $prof) + $modern;               cl=$clUni;   link=$lnGui;  ui=$false },
+    @{ n='test_rules_ui';        src=@('tests\test_rules_ui.c', $prof, $res) + $modern;         cl=$clUni;   link=$lnGui;  ui=$true },
+    @{ n='test_main_ui';         src=@('tests\test_main_ui.c', $prof, $res) + $modern;          cl=$clUni;   link=$lnGui;  ui=$true },
+    @{ n='test_dialogs_ui';      src=@('tests\test_dialogs_ui.c', $prof, $res) + $modern;       cl=$clUni;   link=$lnGui;  ui=$true }
 )
 $runStatic = $true
 if ($Only) { $tests = $tests | Where-Object { $Only -contains $_.n }; $runStatic = ($Only -contains 'static_checks') }
