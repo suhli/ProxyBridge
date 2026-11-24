@@ -31,6 +31,7 @@
 #include "loc/loc.h"
 #include "modern/stats_manager.h"
 #include "modern/d2d_renderer.h"
+#include "modern/window_osd.h"
 #include "modern/overlay_dispatcher.h"
 
 #pragma comment(lib, "comctl32.lib")
@@ -97,7 +98,8 @@ static int       g_tbHot = -1;            // hovered menu-bar icon: 0 = settings
 #define IDC_CONN_SEARCH 3001
 #define IDC_CONN_CLEAR  3002
 #define IDC_ACT_SEARCH  3003
-#define IDC_ACT_CLEAR   3004
+#define IDC_ACT_CLEAR        3004
+#define IDM_SET_OSD_SETTINGS 3090
 
 // Per-log line store so the search box can filter without losing lines. New lines append to
 // the edit only when they match the active filter; changing the filter re-renders from here.
@@ -364,6 +366,12 @@ static void AppendTopMenu(HMENU bar, HMENU sub, const wchar_t* label)
     InsertMenuItemW(bar, GetMenuItemCount(bar), TRUE, &mii);
 }
 
+static void OnModernOsdCfgChanged(const ModernUiConfig* cfg, void* user)
+{
+    (void)user;
+    if (cfg) OverlayDispatcher_SetConfig(cfg);
+}
+
 // Builds the whole menu bar from the string table so a language switch can rebuild it live.
 static void BuildMainMenu(HWND hwnd)
 {
@@ -395,6 +403,8 @@ static void BuildMainMenu(HWND hwnd)
     AppendMenuW(settings, MF_STRING, IDM_SET_STARTUP,     T(S_M_STARTUP));
     AppendMenuW(settings, MF_STRING, IDM_SET_AUTOCLEAR,   T(S_M_AUTOCLEAR));
     AppendMenuW(settings, MF_STRING, IDM_SET_LOGALL,      T(S_M_LOGALL));
+    AppendMenuW(settings, MF_SEPARATOR, 0, NULL);
+    AppendMenuW(settings, MF_STRING, IDM_SET_OSD_SETTINGS, g_lang == 1 ? L"OSD 伴随浮窗设置..." : L"OSD Overlay Settings...");
     AppendMenuW(settings, MF_SEPARATOR, 0, NULL);
     AppendMenuW(settings, MF_STRING, IDM_ZOOM_IN,    T(S_M_ZOOM_IN));
     AppendMenuW(settings, MF_STRING, IDM_ZOOM_OUT,   T(S_M_ZOOM_OUT));
@@ -966,6 +976,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case IDM_SET_AUTOCLEAR:
             g_autoClear = !g_autoClear; g_profile.autoClearLogs = g_autoClear;
             SaveActive(); SyncMenuChecks(hwnd); return 0;
+        case IDM_SET_OSD_SETTINGS:
+            WindowOsd_ShowSettingsWindow(hwnd, &g_modernCfg, OnModernOsdCfgChanged, NULL);
+            return 0;
         case IDM_ZOOM_IN:    SetZoom(hwnd, g_zoom + 10); return 0;
         case IDM_ZOOM_OUT:   SetZoom(hwnd, g_zoom - 10); return 0;
         case IDM_ZOOM_RESET: SetZoom(hwnd, 100);         return 0;
