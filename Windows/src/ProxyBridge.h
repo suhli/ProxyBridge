@@ -61,6 +61,30 @@ PROXYBRIDGE_API BOOL ProxyBridge_DeleteRule(UINT32 rule_id);
 PROXYBRIDGE_API BOOL ProxyBridge_EditRule(UINT32 rule_id, const char* process_name, const char* target_hosts, const char* target_ports, const char* target_domains, RuleProtocol protocol, RuleAction action, UINT32 proxy_config_id, BOOL localhost_via_proxy);
 PROXYBRIDGE_API BOOL ProxyBridge_MoveRuleToPosition(UINT32 rule_id, UINT32 new_position);  // Move rule to specific position (1=first, 2=second, etc)
 PROXYBRIDGE_API UINT32 ProxyBridge_GetRulePosition(UINT32 rule_id);  // Get current position of rule in list (1-based)
+
+#define PB_APPLICATION_RULE_MAX_ID 65535u
+typedef struct {
+    UINT32 id;
+    RuleAction action;
+    const char *process;
+} PB_APPLICATION_RULE;
+
+typedef struct {
+    UINT64 sent;
+    UINT64 received;
+    UINT64 established;
+    UINT64 failed;
+    UINT64 connect_ms;
+    UINT64 active;
+} PB_APPLICATION_STATS;
+
+// Replaces the full ordered rule list atomically. Existing relays retain their original rule ID.
+// ID zero is reserved for a leading DIRECT exclusion rule.
+PROXYBRIDGE_API BOOL ProxyBridge_ReplaceApplicationRules(const PB_APPLICATION_RULE *rules, UINT32 count);
+PROXYBRIDGE_API BOOL ProxyBridge_GetApplicationStats(const UINT32 *ids, PB_APPLICATION_STATS *out, UINT32 count);
+PROXYBRIDGE_API BOOL ProxyBridge_MatchesProcess(const char *pattern, const char *image);
+PROXYBRIDGE_API BOOL ProxyBridge_ApplicationRunning(void);
+
 // Live connections: the flows ProxyBridge is relaying right now (proxied TCP connections and proxied UDP flows).
 // Direct and blocked traffic is not part of it - the engine never sees its data.
 #define PB_FLOWS_MAX 400

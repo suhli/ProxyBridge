@@ -145,5 +145,30 @@ int main(void)
       CHECK(ok != 0 && !ProxyBridge_EditRule(ok, huge, "*", "*", "*", RULE_PROTOCOL_BOTH, RULE_ACTION_BLOCK, 0, FALSE) && m4("ok.exe", "8.8.8.8", 80) == RULE_ACTION_BLOCK);
       ProxyBridge_DeleteRule(ok); }
 
+    {
+        const PB_APPLICATION_RULE rules[] = {
+            {0, RULE_ACTION_DIRECT, "engine.exe"},
+            {7, RULE_ACTION_BLOCK, "*"},
+            {8, RULE_ACTION_DIRECT, "browser.exe"},
+        };
+        CHECK(ProxyBridge_ReplaceApplicationRules(rules, 3));
+        CHECK(m4("engine.exe", "8.8.8.8", 443) == RULE_ACTION_DIRECT);
+        CHECK(m4("browser.exe", "8.8.8.8", 443) == RULE_ACTION_BLOCK && g_tl_rule_id == 7);
+        const PB_APPLICATION_RULE invalid[] = {{7, RULE_ACTION_PROXY, ""}};
+        CHECK(!ProxyBridge_ReplaceApplicationRules(invalid, 1));
+        CHECK(m4("browser.exe", "8.8.8.8", 443) == RULE_ACTION_BLOCK);
+        application_connected(7, 12);
+        application_bytes(7, TRUE, 100);
+        application_bytes(7, FALSE, 200);
+        application_closed(7);
+        CHECK(ProxyBridge_ReplaceApplicationRules(NULL, 0));
+        CHECK(m4("browser.exe", "8.8.8.8", 443) == RULE_ACTION_DIRECT);
+        PB_APPLICATION_STATS stats;
+        UINT32 id = 7;
+        CHECK(ProxyBridge_GetApplicationStats(&id, &stats, 1));
+        CHECK(stats.sent == 100 && stats.received == 200 && stats.established == 1 &&
+              stats.connect_ms == 12 && stats.active == 0);
+    }
+
     return pbtest_done("test_rules_match");
 }

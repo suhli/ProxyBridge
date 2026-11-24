@@ -171,7 +171,7 @@ BOOL get_connection_full_v6_x(UINT16 src_port, BOOL is_udp, UINT8 dest_ip6[16], 
 }
 
 // Reverse lookup for IPv6 UDP relay responses: find src addr+port by orig dest ip6+port
-BOOL find_v6_udp_sender(const UINT8 orig_dest_ip6[16], UINT16 orig_dest_port, UINT8 src_ip6[16], UINT16 *src_port, UINT32 acct_down)
+BOOL find_v6_udp_sender(const UINT8 orig_dest_ip6[16], UINT16 orig_dest_port, UINT8 src_ip6[16], UINT16 *src_port, UINT32 acct_down, UINT32 *rule_id)
 {
     BOOL found = FALSE;
     ULONGLONG best = 0;
@@ -182,6 +182,10 @@ BOOL find_v6_udp_sender(const UINT8 orig_dest_ip6[16], UINT16 orig_dest_port, UI
          conn != NULL; conn = conn->rev_next) {
         if (conn->is_udp && conn->is_ipv6 && conn->orig_dest_port == orig_dest_port &&
             memcmp(conn->orig_dest_ip6, orig_dest_ip6, 16) == 0) {
+            if (found && g_application_mode) {
+                ReleaseSRWLockShared(&lock);
+                return FALSE;
+            }
             if (!found || conn->last_activity > best) {
                 memcpy(src_ip6, conn->src_ip6, 16);
                 *src_port = conn->src_port;
@@ -191,7 +195,10 @@ BOOL find_v6_udp_sender(const UINT8 orig_dest_ip6[16], UINT16 orig_dest_port, UI
             }
         }
     }
-    if (winner != NULL && acct_down) InterlockedExchangeAdd64(&winner->down_bytes, (LONG64)acct_down);
+    if (winner != NULL) {
+        *rule_id = winner->rule_id;
+        if (acct_down) InterlockedExchangeAdd64(&winner->down_bytes, (LONG64)acct_down);
+    }
     ReleaseSRWLockShared(&lock);
     return found;
 }
@@ -453,6 +460,26 @@ UINT32 udp_flows_snapshot(PB_FLOW *out, UINT32 max)
     }
     ReleaseSRWLockShared(&lock);
     return n;
+}
+
+void application_udp_active(const UINT32 *ids, PB_APPLICATION_STATS *out, UINT32 count)
+{
+    ULONGLONG now = GetTickCount64();
+    AcquireSRWLockShared(&lock);
+    for (int i = 0; i < CONNECTION_HASH_SIZE; i++)
+    {
+        for (CONNECTION_INFO *c = connection_hash_table[i]; c != NULL; c = c->next)
+        {
+            if (!c->is_udp || !c->is_tracked || now - c->last_activity > UDP_FLOW_LIVE_MS) continue;
+            for (UINT32 j = 0; j < count; j++)
+            {
+                if (ids[j] != c->rule_id) continue;
+                out[j].active++;
+                break;
+            }
+        }
+    }
+    ReleaseSRWLockShared(&lock);
 }
 
 void cleanup_stale_connections(void)

@@ -97,7 +97,7 @@ int main(void)
       CHECK(get_connection_full_x(60001, TRUE, &xd, &xp, &cfg, &pid, &rule, 300));
       UINT8 dd6[16]; CHECK(get_connection_full_v6_x(60003, TRUE, dd6, &xp, &cfg, &pid, &rule, 77) && pid == 3333);
       UINT8 sr[16]; UINT16 sp;                                                                 /* proxy -> app on IPv6 */
-      CHECK(find_v6_udp_sender(d6, 443, sr, &sp, 5000) && sp == 60003);
+      CHECK(find_v6_udp_sender(d6, 443, sr, &sp, 5000, &rule) && sp == 60003 && rule == 33);
       CHECK(udp_flows_snapshot(f, PB_FLOWS_MAX) == 2);
       for (int i = 0; i < 2; i++)
       {

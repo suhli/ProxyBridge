@@ -64,7 +64,7 @@ RuleAction check_process_rule_v6(const UINT8 src_ip6[16], UINT16 src_port, const
     {
         PROXY_CONFIG *cfg = find_proxy_config(proxy_config_id);
         if (cfg == NULL || cfg->host[0] == '\0' || cfg->port == 0)
-            return RULE_ACTION_DIRECT;
+            return g_application_mode ? RULE_ACTION_BLOCK : RULE_ACTION_DIRECT;
         if (is_udp && cfg->type == PROXY_TYPE_HTTP)
             return RULE_ACTION_DIRECT;
     }
@@ -620,7 +620,7 @@ RuleAction match_rule_inner(const char *process_name, UINT32 dest_ip, UINT16 des
         // Check if this is a wildcard process rule
         BOOL is_wildcard_process = (strcmp(rule->process_name, "*") == 0 || strcmp(rule->process_name, "ANY") == 0);
 
-        if (is_wildcard_process)
+        if (is_wildcard_process && !g_application_mode)
         {
             // Check if wildcard has specific filters
             BOOL has_ip_filter = (strcmp(rule->target_hosts, "*") != 0);
@@ -653,7 +653,7 @@ RuleAction match_rule_inner(const char *process_name, UINT32 dest_ip, UINT16 des
         }
 
         // Check if process name matches
-        if (match_process_list(rule->process_name, process_name))
+        if (is_wildcard_process || match_process_list(rule->process_name, process_name))
         {
             // Process matched! Check IP, port and domain filters
             if (rule_host_match(rule, dest_ip, dst_domain) &&
@@ -731,7 +731,7 @@ RuleAction match_rule_v6_inner(const char *process_name, const UINT8 dest_ip6[16
 
         BOOL is_wildcard_process = (strcmp(rule->process_name, "*") == 0 || strcmp(rule->process_name, "ANY") == 0);
 
-        if (is_wildcard_process)
+        if (is_wildcard_process && !g_application_mode)
         {
             BOOL has_ip_filter   = (strcmp(rule->target_hosts, "*") != 0);
             BOOL has_port_filter = (strcmp(rule->target_ports, "*") != 0);
@@ -756,7 +756,7 @@ RuleAction match_rule_v6_inner(const char *process_name, const UINT8 dest_ip6[16
             continue;
         }
 
-        if (match_process_list(rule->process_name, process_name))
+        if (is_wildcard_process || match_process_list(rule->process_name, process_name))
         {
             if (rule_host_match_v6(rule, dest_ip6, dst_domain) &&
                     match_port_list(rule->target_ports, dest_port))
@@ -831,7 +831,7 @@ RuleAction check_process_rule(UINT32 src_ip, UINT16 src_port, UINT32 dest_ip, UI
     {
         PROXY_CONFIG *cfg = find_proxy_config(proxy_config_id);
         if (cfg == NULL || cfg->host[0] == '\0' || cfg->port == 0)
-            return RULE_ACTION_DIRECT;  // No proxy configured
+            return g_application_mode ? RULE_ACTION_BLOCK : RULE_ACTION_DIRECT;
 
         // UDP: HTTP proxy doesn't support UDP - use per-rule proxy config type
         if (is_udp && cfg->type == PROXY_TYPE_HTTP)
@@ -844,7 +844,7 @@ RuleAction check_process_rule(UINT32 src_ip, UINT16 src_port, UINT32 dest_ip, UI
     return action;
 }
 
-PROXYBRIDGE_API UINT32 ProxyBridge_AddRule(const char* process_name, const char* target_hosts, const char* target_ports, const char* target_domains, RuleProtocol protocol, RuleAction action, UINT32 proxy_config_id, BOOL localhost_via_proxy)
+static PROCESS_RULE *make_rule(const char* process_name, const char* target_hosts, const char* target_ports, const char* target_domains, RuleProtocol protocol, RuleAction action, UINT32 proxy_config_id, BOOL localhost_via_proxy)
 {
     // a list that does not fit is refused: cutting it would silently drop or mangle programs
     if (process_name == NULL || process_name[0] == '\0' || strnlen_s(process_name, MAX_RULE_PROCESS_LIST) >= MAX_RULE_PROCESS_LIST)
@@ -854,7 +854,6 @@ PROXYBRIDGE_API UINT32 ProxyBridge_AddRule(const char* process_name, const char*
     if (rule == NULL)
         return 0;
 
-    rule->rule_id = g_next_rule_id++;
     strncpy_s(rule->process_name, sizeof(rule->process_name), process_name, _TRUNCATE);
     rule->protocol = protocol;
     rule->proxy_config_id = proxy_config_id;
@@ -942,10 +941,19 @@ PROXYBRIDGE_API UINT32 ProxyBridge_AddRule(const char* process_name, const char*
     rule->action = action;
     rule->enabled = TRUE;
     rule->next = NULL;
+    return rule;
+}
+
+PROXYBRIDGE_API UINT32 ProxyBridge_AddRule(const char* process_name, const char* target_hosts, const char* target_ports, const char* target_domains, RuleProtocol protocol, RuleAction action, UINT32 proxy_config_id, BOOL localhost_via_proxy)
+{
+    PROCESS_RULE *rule = make_rule(process_name, target_hosts, target_ports, target_domains,
+                                  protocol, action, proxy_config_id, localhost_via_proxy);
+    if (rule == NULL) return 0;
 
     // Append to tail so rules are evaluated in the order they were added,
     // matching the visual top-to-bottom order in the GUI (fixes issue #93).
     AcquireSRWLockExclusive(&g_rules_lock);
+    rule->rule_id = g_next_rule_id++;
     if (rules_list == NULL)
     {
         rules_list = rule;
@@ -964,6 +972,61 @@ PROXYBRIDGE_API UINT32 ProxyBridge_AddRule(const char* process_name, const char*
     log_message("Added rule ID: %u for process '%s' (Protocol: %d, Action: %d, ProxyConfigId: %u, Domains: %s)", new_id, process_name, protocol, action, proxy_config_id, target_domains ? target_domains : "*");
 
     return new_id;
+}
+
+static void free_rule_list(PROCESS_RULE *rule)
+{
+    while (rule != NULL)
+    {
+        PROCESS_RULE *next = rule->next;
+        free(rule->target_hosts);
+        free(rule->target_ports);
+        free(rule->target_domains);
+        free(rule);
+        rule = next;
+    }
+}
+
+PROXYBRIDGE_API BOOL ProxyBridge_ReplaceApplicationRules(const PB_APPLICATION_RULE *rules, UINT32 count)
+{
+    if (count && rules == NULL) return FALSE;
+    PROCESS_RULE *next = NULL;
+    PROCESS_RULE **tail = &next;
+    for (UINT32 i = 0; i < count; i++)
+    {
+        const PB_APPLICATION_RULE *input = &rules[i];
+        if (input->id > PB_APPLICATION_RULE_MAX_ID || input->action > RULE_ACTION_BLOCK ||
+            (input->id == 0 && (i != 0 || input->action != RULE_ACTION_DIRECT)))
+        {
+            free_rule_list(next);
+            return FALSE;
+        }
+        PROCESS_RULE *rule = make_rule(input->process, NULL, NULL, NULL,
+                                      RULE_PROTOCOL_BOTH, input->action, 0, FALSE);
+        if (rule == NULL)
+        {
+            free_rule_list(next);
+            return FALSE;
+        }
+        rule->rule_id = input->id;
+        *tail = rule;
+        tail = &rule->next;
+    }
+
+    AcquireSRWLockExclusive(&g_rules_lock);
+    PROCESS_RULE *old = rules_list;
+    rules_list = next;
+    g_application_mode = TRUE;
+    g_has_domain_rules = FALSE;
+    g_has_active_rules = next != NULL;
+    ReleaseSRWLockExclusive(&g_rules_lock);
+    free_rule_list(old);
+    return TRUE;
+}
+
+PROXYBRIDGE_API BOOL ProxyBridge_MatchesProcess(const char *pattern, const char *image)
+{
+    return pattern != NULL && image != NULL && match_process_list(pattern, image);
 }
 
 PROXYBRIDGE_API BOOL ProxyBridge_EnableRule(UINT32 rule_id)

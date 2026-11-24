@@ -1,5 +1,58 @@
 #include "pb_internal.h"
 
+typedef struct {
+    volatile LONG64 sent, received, established, failed, connect_ms, active;
+} APPLICATION_COUNTERS;
+
+static APPLICATION_COUNTERS application_stats[PB_APPLICATION_RULE_MAX_ID + 1];
+
+static BOOL application_tracks(UINT32 id)
+{
+    return g_application_mode && id && id <= PB_APPLICATION_RULE_MAX_ID;
+}
+
+void application_bytes(UINT32 id, BOOL upload, UINT32 size)
+{
+    if (application_tracks(id))
+        InterlockedExchangeAdd64(upload ? &application_stats[id].sent : &application_stats[id].received, size);
+}
+
+void application_connected(UINT32 id, UINT64 elapsed_ms)
+{
+    if (!application_tracks(id)) return;
+    InterlockedExchangeAdd64(&application_stats[id].connect_ms, (LONG64)elapsed_ms);
+    InterlockedIncrement64(&application_stats[id].established);
+    InterlockedIncrement64(&application_stats[id].active);
+}
+
+void application_failed(UINT32 id)
+{
+    if (application_tracks(id)) InterlockedIncrement64(&application_stats[id].failed);
+}
+
+void application_closed(UINT32 id)
+{
+    if (application_tracks(id)) InterlockedDecrement64(&application_stats[id].active);
+}
+
+PROXYBRIDGE_API BOOL ProxyBridge_GetApplicationStats(const UINT32 *ids, PB_APPLICATION_STATS *out, UINT32 count)
+{
+    if (count && (ids == NULL || out == NULL)) return FALSE;
+    for (UINT32 i = 0; i < count; i++)
+    {
+        if (!application_tracks(ids[i])) return FALSE;
+        APPLICATION_COUNTERS *c = &application_stats[ids[i]];
+        out[i].sent = (UINT64)InterlockedCompareExchange64(&c->sent, 0, 0);
+        out[i].received = (UINT64)InterlockedCompareExchange64(&c->received, 0, 0);
+        out[i].established = (UINT64)InterlockedCompareExchange64(&c->established, 0, 0);
+        out[i].failed = (UINT64)InterlockedCompareExchange64(&c->failed, 0, 0);
+        out[i].connect_ms = (UINT64)InterlockedCompareExchange64(&c->connect_ms, 0, 0);
+        out[i].active = (UINT64)InterlockedCompareExchange64(&c->active, 0, 0);
+    }
+    if (count && running) application_udp_active(ids, out, count);
+    return TRUE;
+}
+
 // Relay: TCP/UDP relay servers and per-connection worker threads.
 
 DWORD WINAPI udp_relay_server(LPVOID arg)
@@ -166,8 +219,8 @@ DWORD WINAPI udp_relay_server(LPVOID arg)
                 UINT32 dest_ip;
                 UINT16 dest_port;
 
-                UINT32 proxy_config_id = 0;
-                if (get_connection_full_x(from_port, TRUE, &dest_ip, &dest_port, &proxy_config_id, NULL, NULL, (UINT32)recv_len))
+                UINT32 proxy_config_id = 0, rule_id = 0;
+                if (get_connection_full_x(from_port, TRUE, &dest_ip, &dest_port, &proxy_config_id, NULL, &rule_id, (UINT32)recv_len))
                 {
                     PROXY_CONFIG *cfg = find_proxy_config(proxy_config_id);
 
@@ -184,6 +237,7 @@ DWORD WINAPI udp_relay_server(LPVOID arg)
                     {
                         if (!establish_udp_associate_for_config(cfg))
                         {
+                            application_failed(rule_id);
                             log_message("[UDP RELAY] UDP ASSOCIATE unavailable for %s:%d - dropping packet", cfg->host, cfg->port);
                             continue;
                         }
@@ -215,11 +269,13 @@ DWORD WINAPI udp_relay_server(LPVOID arg)
                         // lose at most one packet during a proxy reconnect event.
                         if (establish_udp_associate_for_config(cfg))
                         {
-                            sendto(cfg->udp_send_sock, (char*)send_buf, 10 + recv_len, 0,
+                            sent = sendto(cfg->udp_send_sock, (char*)send_buf, 10 + recv_len, 0,
                                    (struct sockaddr *)&cfg->udp_relay_addr, sizeof(cfg->udp_relay_addr));
                         }
                         assoc_replaced = 1;   // sockets replaced - read_fds is stale
                     }
+                    if (sent == 10 + recv_len) application_bytes(rule_id, TRUE, (UINT32)recv_len);
+                    else application_failed(rule_id);
                 }
             }
         }
@@ -275,6 +331,7 @@ DWORD WINAPI udp_relay_server(LPVOID arg)
                     UINT32 target_ip = 0;
                     UINT16 target_port = 0;
                     CONNECTION_INFO *winner_conn = NULL;
+                    UINT32 rule_id = 0;
 
                     AcquireSRWLockShared(&lock);
                     ULONGLONG best_activity = 0;
@@ -285,6 +342,8 @@ DWORD WINAPI udp_relay_server(LPVOID arg)
                     {
                         if (conn->is_udp && !conn->is_ipv6 && conn->orig_dest_ip == src_ip && conn->orig_dest_port == src_port)
                         {
+                            // A shared UDP association cannot identify the recipient of an ambiguous reply.
+                            if (found && g_application_mode) { found = FALSE; winner_conn = NULL; break; }
                             if (!found || conn->last_activity > best_activity)
                             {
                                 target_ip    = conn->src_ip;
@@ -301,6 +360,7 @@ DWORD WINAPI udp_relay_server(LPVOID arg)
                     // use the original, unmodified timestamps for all candidates).
                     if (winner_conn != NULL)
                     {
+                        rule_id = winner_conn->rule_id;
                         InterlockedExchange64((LONGLONG volatile*)&winner_conn->last_activity, (LONGLONG)GetTickCount64());
                         InterlockedExchangeAdd64(&winner_conn->down_bytes, (LONG64)(recv_len - 10));
                     }
@@ -317,6 +377,7 @@ DWORD WINAPI udp_relay_server(LPVOID arg)
                                (struct sockaddr*)&target_addr, sizeof(target_addr));
                         if (fwd == SOCKET_ERROR)
                             log_message("[UDP RELAY] sendto client port %d failed: %d", target_port, WSAGetLastError());
+                        else application_bytes(rule_id, FALSE, (UINT32)fwd);
                     }
                     else
                     {
@@ -332,15 +393,17 @@ DWORD WINAPI udp_relay_server(LPVOID arg)
 
                     UINT8 target_ip6[16];
                     UINT16 target_port = 0;
-                    if (find_v6_udp_sender(src_ip6, src_port, target_ip6, &target_port, (UINT32)(recv_len - 22)) && udp_relay_socket6 != INVALID_SOCKET)
+                    UINT32 rule_id = 0;
+                    if (find_v6_udp_sender(src_ip6, src_port, target_ip6, &target_port, (UINT32)(recv_len - 22), &rule_id) && udp_relay_socket6 != INVALID_SOCKET)
                     {
                         struct sockaddr_in6 t6;
                         memset(&t6, 0, sizeof(t6));
                         t6.sin6_family = AF_INET6;
                         memcpy(&t6.sin6_addr, target_ip6, 16);
                         t6.sin6_port = htons(target_port);
-                        sendto(udp_relay_socket6, (char*)&recv_buf[22], recv_len-22, 0,
+                        int sent = sendto(udp_relay_socket6, (char*)&recv_buf[22], recv_len-22, 0,
                                (struct sockaddr*)&t6, sizeof(t6));
+                        if (sent != SOCKET_ERROR) application_bytes(rule_id, FALSE, (UINT32)sent);
                     }
                 }
             }
@@ -358,9 +421,9 @@ DWORD WINAPI udp_relay_server(LPVOID arg)
                 UINT16 from_port = ntohs(from_addr6.sin6_port);
                 UINT8  dest_ip6[16];
                 UINT16 dest_port = 0;
-                UINT32 proxy_config_id = 0;
+                UINT32 proxy_config_id = 0, rule_id = 0;
 
-                if (get_connection_full_v6_x(from_port, TRUE, dest_ip6, &dest_port, &proxy_config_id, NULL, NULL, (UINT32)recv_len))
+                if (get_connection_full_v6_x(from_port, TRUE, dest_ip6, &dest_port, &proxy_config_id, NULL, &rule_id, (UINT32)recv_len))
                 {
                     PROXY_CONFIG *cfg = find_proxy_config(proxy_config_id);
                     if (cfg != NULL && cfg->type == PROXY_TYPE_SOCKS5)
@@ -374,9 +437,12 @@ DWORD WINAPI udp_relay_server(LPVOID arg)
                             send_buf[20] = (dest_port>>8)&0xFF;
                             send_buf[21] = (dest_port>>0)&0xFF;
                             memcpy(&send_buf[22], recv_buf, recv_len);
-                            sendto(cfg->udp_send_sock, (char*)send_buf, 22+recv_len, 0,
+                            int sent = sendto(cfg->udp_send_sock, (char*)send_buf, 22+recv_len, 0,
                                    (struct sockaddr*)&cfg->udp_relay_addr, sizeof(cfg->udp_relay_addr));
+                            if (sent == 22 + recv_len) application_bytes(rule_id, TRUE, (UINT32)recv_len);
+                            else application_failed(rule_id);
                         }
+                        else application_failed(rule_id);
                     }
                 }
             }
@@ -588,7 +654,9 @@ static DWORD WINAPI connection_handler_impl(LPVOID arg);
 // is unloaded (the service reloads the engine for every GUI connection) crashes the process.
 DWORD WINAPI connection_handler(LPVOID arg)
 {
+    UINT32 id = ((CONNECTION_CONFIG *)arg)->rule_id;
     DWORD r = connection_handler_impl(arg);
+    if (r != 0) application_failed(id);
     InterlockedDecrement(&g_handler_threads);
     return r;
 }
@@ -609,6 +677,7 @@ static DWORD WINAPI connection_handler_impl(LPVOID arg)
     if (is_ipv6) memcpy(meta.dest, dest_ip6, 16); else memcpy(meta.dest, &dest_ip, 4);
     SOCKET socks_sock;
     struct sockaddr_in socks_addr;
+    ULONGLONG connect_start = GetTickCount64();
 
     free(config);
 
@@ -634,7 +703,7 @@ static DWORD WINAPI connection_handler_impl(LPVOID arg)
     {
         log_message("Socket creation failed (%d)", WSAGetLastError());
         closesocket(client_sock);
-        return 0;
+        return 1;
     }
 
     // 4 MB kernel socket buffers for the relay sockets.
@@ -658,7 +727,7 @@ static DWORD WINAPI connection_handler_impl(LPVOID arg)
         log_message("[RELAY] Failed to connect to proxy %s:%d (%d)", proxy->host, proxy->port, WSAGetLastError());
         closesocket(client_sock);
         closesocket(socks_sock);
-        return 0;
+        return 1;
     }
 
     if (proxy->type == PROXY_TYPE_SOCKS5)
@@ -685,7 +754,7 @@ static DWORD WINAPI connection_handler_impl(LPVOID arg)
         {
             reset_close(client_sock);
             closesocket(socks_sock);
-            return 0;
+            return 1;
         }
     }
     else if (proxy->type == PROXY_TYPE_HTTP)
@@ -697,7 +766,7 @@ static DWORD WINAPI connection_handler_impl(LPVOID arg)
         {
             reset_close(client_sock);
             closesocket(socks_sock);
-            return 0;
+            return 1;
         }
     }
 
@@ -717,6 +786,7 @@ static DWORD WINAPI connection_handler_impl(LPVOID arg)
     WSAIoctl(socks_sock, SIO_KEEPALIVE_VALS, &keepalive_settings, sizeof(keepalive_settings), NULL, 0, &bytes_returned, NULL, NULL);
     WSAIoctl(client_sock, SIO_KEEPALIVE_VALS, &keepalive_settings, sizeof(keepalive_settings), NULL, 0, &bytes_returned, NULL, NULL);
 
+    application_connected(meta.rule_id, GetTickCount64() - connect_start);
     // Preferred path: hand both sockets to the IOCP pool (no per-connection threads).
     if (relay_start(client_sock, socks_sock, &meta))
         return 0;
@@ -728,14 +798,17 @@ static DWORD WINAPI connection_handler_impl(LPVOID arg)
         log_message("Memory allocation failed for transfer_config");
         closesocket(client_sock);
         closesocket(socks_sock);
+        application_closed(meta.rule_id);
         return 0;
     }
 
     transfer_config->from_socket = client_sock;
     transfer_config->to_socket = socks_sock;
+    transfer_config->rule_id = meta.rule_id;
 
     // both transfer in current thread
     transfer_handler((LPVOID)transfer_config);
+    application_closed(meta.rule_id);
 
     // Sockets already closed in transfer_handler!
 
@@ -755,6 +828,7 @@ DWORD WINAPI one_way_relay(LPVOID arg)
     RELAY_PAIR *pair = cfg->pair;
     SOCKET from = cfg->from;
     SOCKET to   = cfg->to;
+    BOOL upload = cfg->upload;
     free(cfg);
 
     char *buf = (char *)malloc(131072);  // 128 KB per-direction buffer
@@ -765,6 +839,7 @@ DWORD WINAPI one_way_relay(LPVOID arg)
         {
             if (send_all(to, buf, len) == SOCKET_ERROR)
                 break;
+            application_bytes(pair->rule_id, upload, (UINT32)len);
         }
         free(buf);
     }
@@ -795,6 +870,7 @@ DWORD WINAPI transfer_handler(LPVOID arg)
     TRANSFER_CONFIG *config = (TRANSFER_CONFIG *)arg;
     SOCKET sock_client = config->from_socket;
     SOCKET sock_proxy  = config->to_socket;
+    UINT32 rule_id = config->rule_id;
     free(config);
 
     RELAY_PAIR *pair = (RELAY_PAIR *)malloc(sizeof(RELAY_PAIR));
@@ -807,6 +883,7 @@ DWORD WINAPI transfer_handler(LPVOID arg)
     pair->sock_client = sock_client;
     pair->sock_proxy  = sock_proxy;
     pair->refs        = 2;
+    pair->rule_id     = rule_id;
 
     // Upload: client → proxy  (dedicated thread - may block on slow proxy send)
     ONE_WAY_CONFIG *up = (ONE_WAY_CONFIG *)malloc(sizeof(ONE_WAY_CONFIG));
@@ -825,6 +902,7 @@ DWORD WINAPI transfer_handler(LPVOID arg)
 
     up->pair = pair;  up->from = sock_client;  up->to = sock_proxy;
     dn->pair = pair;  dn->from = sock_proxy;   dn->to = sock_client;
+    up->upload = TRUE; dn->upload = FALSE;
 
     // Spawn the upload relay in its own thread.
     HANDLE upload_thread = CreateThread(NULL, 0, one_way_relay, up, 0, NULL);
@@ -945,6 +1023,7 @@ static void relay_release(RELAY_CONN *rc)
     closesocket(rc->s[1]);
     relay_buf_put(rc->dir[0].buf);
     relay_buf_put(rc->dir[1].buf);
+    application_closed(rc->meta.rule_id);
     free(rc);
     InterlockedDecrement(&g_active_relays);
 }
@@ -1016,6 +1095,7 @@ static DWORD WINAPI relay_worker(LPVOID arg)
         default:                                       // RS_SEND
             if (n == 0) { relay_dir_end(d); continue; }
             InterlockedExchangeAdd64(&d->bytes, (LONG64)n);
+            application_bytes(d->rc->meta.rule_id, d == &d->rc->dir[0], n);
             d->off += n;
             if (d->off < d->len) posted = relay_post_send(d);
             else if (d->len < RELAY_BUF_SIZE / 4) posted = relay_post_wait(d);   // lightly used: drop the buffer

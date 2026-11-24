@@ -139,6 +139,7 @@ typedef struct {
 typedef struct {
     SOCKET from_socket;
     SOCKET to_socket;
+    UINT32 rule_id;
 } TRANSFER_CONFIG;
 
 // Two-thread bidirectional relay: each direction runs in its own thread so
@@ -147,12 +148,14 @@ typedef struct {
     SOCKET sock_client;   // app-side socket
     SOCKET sock_proxy;    // proxy-side socket
     volatile LONG refs;   // ref-count; last thread out closes both sockets
+    UINT32 rule_id;
 } RELAY_PAIR;
 
 typedef struct {
     RELAY_PAIR *pair;
     SOCKET from;
     SOCKET to;
+    BOOL upload;
 } ONE_WAY_CONFIG;
 
 typedef struct LOGGED_CONNECTION {
@@ -211,6 +214,12 @@ extern HANDLE cleanup_thread;
 extern PID_CACHE_ENTRY *pid_cache[PID_CACHE_SIZE];
 extern volatile BOOL g_has_active_rules;
 extern volatile BOOL g_has_domain_rules;
+extern volatile BOOL g_application_mode;
+void application_bytes(UINT32 id, BOOL upload, UINT32 size);
+void application_connected(UINT32 id, UINT64 elapsed_ms);
+void application_failed(UINT32 id);
+void application_closed(UINT32 id);
+void application_udp_active(const UINT32 *ids, PB_APPLICATION_STATS *out, UINT32 count);
 extern volatile BOOL g_log_every_connection;   // TRUE: the Connections log is not de-duplicated (every new TCP connection, every new UDP flow)
 extern volatile BOOL g_proxy_enabled;   // FALSE = paused: new connections are neither proxied nor blocked (existing ones carry on)
 extern SOCKET udp_relay_socket;
@@ -359,7 +368,7 @@ void add_connection(UINT16 src_port, BOOL is_udp, UINT32 src_ip, UINT32 dest_ip,
 void add_connection_v6(UINT16 src_port, BOOL is_udp, const UINT8 src_ip6[16], const UINT8 dest_ip6[16], UINT16 dest_port, UINT32 proxy_config_id, DWORD pid, UINT32 rule_id);
 BOOL get_connection_full_v6(UINT16 src_port, BOOL is_udp, UINT8 dest_ip6[16], UINT16 *dest_port, UINT32 *proxy_config_id);
 // acct_down: payload bytes to add to the winning flow's "received" counter (0 = none)
-BOOL find_v6_udp_sender(const UINT8 orig_dest_ip6[16], UINT16 orig_dest_port, UINT8 src_ip6[16], UINT16 *src_port, UINT32 acct_down);
+BOOL find_v6_udp_sender(const UINT8 orig_dest_ip6[16], UINT16 orig_dest_port, UINT8 src_ip6[16], UINT16 *src_port, UINT32 acct_down, UINT32 *rule_id);
 // UDP flow validation for the app->relay redirect. A UDP "connection" is keyed by source port
 // only, so it must be re-checked on every datagram: (a) if the destination changed (a socket
 // that moves to another server, e.g. a voice call migrating) the entry is retargeted, and

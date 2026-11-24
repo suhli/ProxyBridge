@@ -31,6 +31,7 @@ HANDLE udp_relay_thread = NULL;
 HANDLE cleanup_thread = NULL;
 PID_CACHE_ENTRY *pid_cache[PID_CACHE_SIZE] = {NULL};
 volatile BOOL g_has_active_rules = FALSE;
+volatile BOOL g_application_mode = FALSE;
 // Set when at least one enabled rule carries a domain filter. Gates the DNS-cache
 // lookup in match_rule so setups without domain rules pay zero extra cost.
 volatile BOOL g_has_domain_rules = FALSE;
@@ -1235,7 +1236,8 @@ PROXYBRIDGE_API BOOL ProxyBridge_Start(void)
 
     relay_pool_start();   // optional: connections fall back to blocking relay threads without it
 
-    g_fw_thread = CreateThread(NULL, 0, fw_ensure_thread, NULL, 0, NULL);
+    if (!g_application_mode)
+        g_fw_thread = CreateThread(NULL, 0, fw_ensure_thread, NULL, 0, NULL);
 
     proxy_thread = CreateThread(NULL, 1, local_proxy_server, NULL, 0, NULL);
     if (proxy_thread == NULL)
@@ -1321,10 +1323,8 @@ PROXYBRIDGE_API BOOL ProxyBridge_Start(void)
                 log_message("Failed to open WinDivert (%lu): Ensure ProxyBridge is installed correctly and running as Administrator.", wd_err);
                 break;
         }
-        running = FALSE;
-        WaitForSingleObject(proxy_thread, INFINITE);
-        CloseHandle(proxy_thread);
-        proxy_thread = NULL;
+        ProxyBridge_Stop();
+        SetLastError(wd_err);
         return FALSE;
     }
 
@@ -1401,12 +1401,24 @@ PROXYBRIDGE_API BOOL ProxyBridge_Start(void)
     return TRUE;
 }
 
+PROXYBRIDGE_API BOOL ProxyBridge_ApplicationRunning(void)
+{
+    DWORD status;
+    if (!running || windivert_handle == INVALID_HANDLE_VALUE || proxy_thread == NULL ||
+        !GetExitCodeThread(proxy_thread, &status) || status != STILL_ACTIVE) return FALSE;
+    for (int i = 0; i < NUM_PACKET_THREADS; i++)
+        if (packet_thread[i] != NULL && GetExitCodeThread(packet_thread[i], &status) && status == STILL_ACTIVE)
+            return TRUE;
+    return FALSE;
+}
+
 PROXYBRIDGE_API BOOL ProxyBridge_Stop(void)
 {
     if (!running)
         return FALSE;
 
     running = FALSE;
+    BOOL all_stopped = TRUE;
 
     sockmap_stop();
 
@@ -1422,7 +1434,7 @@ PROXYBRIDGE_API BOOL ProxyBridge_Stop(void)
     {
         if (packet_thread[i] != NULL)
         {
-            WaitForSingleObject(packet_thread[i], 8000);  // generous: a thread outliving Stop would run code from an unloaded DLL
+            if (WaitForSingleObject(packet_thread[i], 8000) != WAIT_OBJECT_0) all_stopped = FALSE;
             CloseHandle(packet_thread[i]);
             packet_thread[i] = NULL;
         }
@@ -1430,21 +1442,21 @@ PROXYBRIDGE_API BOOL ProxyBridge_Stop(void)
 
     if (proxy_thread != NULL)
     {
-        WaitForSingleObject(proxy_thread, 8000);  // generous: a thread outliving Stop would run code from an unloaded DLL
+        if (WaitForSingleObject(proxy_thread, 8000) != WAIT_OBJECT_0) all_stopped = FALSE;
         CloseHandle(proxy_thread);
         proxy_thread = NULL;
     }
 
     if (cleanup_thread != NULL)
     {
-        WaitForSingleObject(cleanup_thread, 8000);  // generous: a thread outliving Stop would run code from an unloaded DLL
+        if (WaitForSingleObject(cleanup_thread, 8000) != WAIT_OBJECT_0) all_stopped = FALSE;
         CloseHandle(cleanup_thread);
         cleanup_thread = NULL;
     }
 
     if (udp_relay_thread != NULL)
     {
-        WaitForSingleObject(udp_relay_thread, 8000);  // generous: a thread outliving Stop would run code from an unloaded DLL
+        if (WaitForSingleObject(udp_relay_thread, 8000) != WAIT_OBJECT_0) all_stopped = FALSE;
         CloseHandle(udp_relay_thread);
         udp_relay_thread = NULL;
     }
@@ -1452,6 +1464,7 @@ PROXYBRIDGE_API BOOL ProxyBridge_Stop(void)
     // Handshake threads (connect to the proxy + SOCKS/HTTP negotiation) can still be mid-flight.
     for (int i = 0; i < 700 && g_handler_threads > 0; i++) Sleep(50);    // up to 35 s
     if (g_handler_threads > 0) log_message("Stop: %ld connection thread(s) still running", (long)g_handler_threads);
+    if (g_application_mode && (!all_stopped || g_handler_threads > 0)) return FALSE;
 
     if (g_fw_thread != NULL)
     {
@@ -1463,6 +1476,7 @@ PROXYBRIDGE_API BOOL ProxyBridge_Stop(void)
     // Close every live relay and stop the pool's worker threads (the accept loop has ended,
     // so no new relays arrive). Must finish before the engine can be unloaded.
     relay_pool_stop();
+    if (g_application_mode && g_active_relays != 0) return FALSE;
 
     AcquireSRWLockExclusive(&lock);
     for (int i = 0; i < CONNECTION_HASH_SIZE; i++)
