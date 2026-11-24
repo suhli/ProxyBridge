@@ -29,7 +29,7 @@ static LRESULT CALLBACK ListDarkSubProc(HWND h, UINT m, WPARAM w, LPARAM l, UINT
                 Header_GetItem(nh->hwndFrom, (int)cd->dwItemSpec, &hi);
                 FillRect(cd->hdc, &cd->rc, g_brPanel);
                 SetBkMode(cd->hdc, TRANSPARENT);
-                SetTextColor(cd->hdc, C_TEXT);
+                SetTextColor(cd->hdc, UiClrText());
                 RECT tr = cd->rc; tr.left += 6; tr.right -= 4;
                 DrawTextW(cd->hdc, txt, -1, &tr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
                 RECT ln = { cd->rc.right - 1, cd->rc.top, cd->rc.right, cd->rc.bottom };
@@ -82,15 +82,14 @@ static void FillColumns(HWND lv, int count)
     }
 }
 
-// Dark-theme a report ListView: full-row select + double buffer (+ any extra ex-styles),
-// dark colours, dark-drawn header. Columns/FillColumns are added by the caller.
+// Theme a report ListView to match the active light/dark mode.
 static void DarkListView(HWND lv, DWORD extraExStyle)
 {
     ListView_SetExtendedListViewStyle(lv, LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | extraExStyle);
-    SetWindowTheme(lv, L"DarkMode_Explorer", NULL);
-    ListView_SetBkColor(lv, C_PANEL);
-    ListView_SetTextBkColor(lv, C_PANEL);
-    ListView_SetTextColor(lv, C_TEXT);
+    SetWindowTheme(lv, g_uiIsDark ? L"DarkMode_Explorer" : L"Explorer", NULL);
+    ListView_SetBkColor(lv, UiClrCard());
+    ListView_SetTextBkColor(lv, UiClrCard());
+    ListView_SetTextColor(lv, UiClrText());
     SetWindowSubclass(lv, ListDarkSubProc, 3, 0);
 }
 
@@ -974,20 +973,21 @@ INT_PTR CALLBACK RuleEditDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
         InitDarkMode(dlg);
         return TRUE;
     }
-    case WM_CTLCOLORDLG:
     case WM_CTLCOLOREDIT:
     case WM_CTLCOLORLISTBOX:
+        return DlgCtlColorEdit(wp);
+    case WM_CTLCOLORDLG:
     case WM_CTLCOLORBTN:
         return DlgCtlColor(wp);
     case WM_CTLCOLORSTATIC:
     {
         HDC dc = (HDC)wp;
         int id = GetDlgCtrlID((HWND)lp);
-        SetBkColor(dc, C_BG);
-        if (id == IDC_RE_UDPNOTE) SetTextColor(dc, C_WARN);
+        SetBkColor(dc, UiClrBg());
+        if (id == IDC_RE_UDPNOTE) SetTextColor(dc, g_uiIsDark ? C_WARN : RGB(0xB4, 0x53, 0x09));
         else if (id == IDC_RE_EX_APPS || id == IDC_RE_EX_HOSTS ||
-                 id == IDC_RE_EX_PORTS || id == IDC_RE_EX_LOCAL) SetTextColor(dc, C_DIM);
-        else SetTextColor(dc, C_TEXT);
+                 id == IDC_RE_EX_PORTS || id == IDC_RE_EX_LOCAL) SetTextColor(dc, UiClrDim());
+        else SetTextColor(dc, UiClrText());
         return (INT_PTR)g_brBg;
     }
     case WM_COMMAND:
@@ -1421,8 +1421,8 @@ INT_PTR CALLBACK AboutDlgProc(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
     {
         HDC dc = (HDC)wp;
         int id = GetDlgCtrlID((HWND)lp);
-        SetBkColor(dc, C_BG);
-        SetTextColor(dc, id == IDC_AB_TITLE ? C_ACCENT : (id == IDC_AB_DESC || id == 0 ? C_TEXT : C_DIM));
+        SetBkColor(dc, UiClrBg());
+        SetTextColor(dc, id == IDC_AB_TITLE ? RGB(0x00, 0x78, 0xD4) : (id == IDC_AB_DESC || id == 0 ? UiClrText() : UiClrDim()));
         return (INT_PTR)g_brBg;
     }
     case WM_NOTIFY:

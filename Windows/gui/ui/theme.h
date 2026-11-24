@@ -75,10 +75,10 @@ static LRESULT CALLBACK GroupSubProc(HWND h, UINT m, WPARAM w, LPARAM l, UINT_PT
     return DefSubclassProc(h, m, w, l);
 }
 
-// Apply the matching light/dark theme to a child control by class.
+// Apply the matching light/dark theme + Web-SPA rounded buttons to a child control by class.
 static BOOL CALLBACK DarkThemeChild(HWND h, LPARAM lp)
 {
-    (void)lp;
+    BOOL styleButtons = (lp != 0);
     const wchar_t* cfd = g_uiIsDark ? L"DarkMode_CFD"      : L"Explorer";
     const wchar_t* exp = g_uiIsDark ? L"DarkMode_Explorer" : L"Explorer";
     wchar_t cls[48]; GetClassNameW(h, cls, 48);
@@ -86,8 +86,19 @@ static BOOL CALLBACK DarkThemeChild(HWND h, LPARAM lp)
         SetWindowTheme(h, cfd, NULL);
     else if (!_wcsicmp(cls, L"Button"))
     {
-        if ((GetWindowLongW(h, GWL_STYLE) & BS_TYPEMASK) == BS_GROUPBOX)
+        DWORD bt = (DWORD)(GetWindowLongW(h, GWL_STYLE) & BS_TYPEMASK);
+        if (bt == BS_GROUPBOX)
             SetWindowSubclass(h, GroupSubProc, 7, 0);
+        else if (styleButtons && (bt == BS_PUSHBUTTON || bt == BS_DEFPUSHBUTTON))
+        {
+            int id = GetDlgCtrlID(h);
+            ModernBtnVariant v = MODERN_BTN_DEFAULT;
+            if (id == IDOK || id == IDC_SV_ADD || id == IDC_RL_ADD || id == IDC_FL_ADD || id == IDC_UP_NOW)
+                v = MODERN_BTN_PRIMARY;
+            else if (id == IDC_SV_REMOVE || id == IDC_RL_REMOVE || id == IDC_FL_REMOVE)
+                v = MODERN_BTN_DANGER;
+            ModernMain_StyleButton(h, v);
+        }
         else
             SetWindowTheme(h, exp, NULL);
     }
@@ -112,9 +123,8 @@ static void InitDarkMode(HWND hwnd)
         if (flush)   flush();
         FreeLibrary(ux);   // ordinals were called; release our loader ref (called per dialog)
     }
-    BOOL dark = g_uiIsDark ? TRUE : FALSE;
-    DwmSetWindowAttribute(hwnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &dark, sizeof(dark));
-    EnumChildWindows(hwnd, DarkThemeChild, 0);
+    D2d_ApplyWindowDwm(hwnd, g_uiIsDark, FALSE, TRUE);
+    EnumChildWindows(hwnd, DarkThemeChild, (LPARAM)(hwnd != g_hMain));
 }
 
 // Paint over the 1px line the OS draws under the menu bar so it matches the active theme.
@@ -141,10 +151,18 @@ static INT_PTR DlgCtlColor(WPARAM wp)
     return (INT_PTR)g_brBg;
 }
 
+static INT_PTR DlgCtlColorEdit(WPARAM wp)
+{
+    HDC dc = (HDC)wp;
+    SetTextColor(dc, UiClrText());
+    SetBkColor(dc, UiClrCard());
+    return (INT_PTR)(g_brModernCard ? g_brModernCard : g_brBg);
+}
+
 // Drop-in theme handling for every WM_CTLCOLOR* a dialog gets. Use inside a dialog proc's
 // switch for the common case; dialogs that need per-control colours handle them explicitly.
 #define PB_DARK_CTLCOLORS                                                    \
-    case WM_CTLCOLORDLG: case WM_CTLCOLOREDIT: case WM_CTLCOLORLISTBOX:      \
-    case WM_CTLCOLORBTN: case WM_CTLCOLORSTATIC: return DlgCtlColor(wp)
+    case WM_CTLCOLOREDIT: case WM_CTLCOLORLISTBOX: return DlgCtlColorEdit(wp); \
+    case WM_CTLCOLORDLG: case WM_CTLCOLORBTN: case WM_CTLCOLORSTATIC: return DlgCtlColor(wp)
 
 #endif // PB_UI_THEME_H

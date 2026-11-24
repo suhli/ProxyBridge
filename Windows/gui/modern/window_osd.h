@@ -22,6 +22,7 @@ void WindowOsd_Hide(void);
 // Modeless in-app live-preview OSD Settings window (position, X/Y offset, opacity, scale, compact, RTSS).
 void WindowOsd_ShowSettingsWindow(HWND owner, ModernUiConfig *cfg,
                                   WindowOsdConfigChangedCallback onChanged, void *user);
+void WindowOsd_SyncSettingsTheme(void);
 void WindowOsd_CloseSettingsWindow(void);
 
 // Inspection helpers (used by overlay_dispatcher & verification).

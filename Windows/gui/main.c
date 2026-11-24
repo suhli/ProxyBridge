@@ -485,6 +485,7 @@ static void ApplyModernThemeAll(HWND hwnd)
     }
     FloatingCapsule_ApplyConfig(&g_modernCfg);
     OverlayDispatcher_SetConfig(&g_modernCfg);
+    WindowOsd_SyncSettingsTheme();
     RedrawWindow(hwnd, NULL, NULL, RDW_FRAME | RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
     DrawMenuBar2(hwnd);
 }

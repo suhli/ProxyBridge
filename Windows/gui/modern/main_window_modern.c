@@ -996,6 +996,7 @@ static LRESULT CALLBACK SpaButtonSubProc(HWND h, UINT m, WPARAM w, LPARAM l, UIN
     }
     case WM_NCDESTROY:
         RemovePropW(h, PROP_SPA_BTN_STATE);
+        RemovePropW(h, L"PbSpaBtnOnCard");
         break;
     case WM_PAINT:
     {
@@ -1011,7 +1012,10 @@ static LRESULT CALLBACK SpaButtonSubProc(HWND h, UINT m, WPARAM w, LPARAM l, UIN
         BOOL down    = (st & 2u) != 0;
         BOOL enabled = IsWindowEnabled(h);
 
-        uint32_t canvasBg = g_isDark ? 0xFF1C1C1Fu : 0xFFF3F4F6u;
+        BOOL onCard = (GetPropW(h, L"PbSpaBtnOnCard") != NULL);
+        uint32_t canvasBg = onCard
+            ? (g_isDark ? 0xFF232429u : 0xFFFFFFFFu)
+            : (g_isDark ? 0xFF1C1C1Fu : 0xFFF3F4F6u);
         uint32_t fillClr, borderClr, textClr;
 
         if (variant == MODERN_BTN_PRIMARY) {
