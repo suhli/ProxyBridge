@@ -27,7 +27,7 @@ static void DisableAllChannels(void)
 //   - Otherwise                           -> RTSS slot MUST be emptied; Channel B (native OSD) ONLY.
 static void ArbitrateForTarget(HWND targetHwnd, DWORD fgPid, const ModernAppTraffic *app, BOOL proxyEnabled)
 {
-    if (!g_dispCfg.osdEnabled || !app || fgPid == 0 || fgPid == GetCurrentProcessId()) {
+    if ((!g_dispCfg.osdEnabled && !g_dispCfg.rtssEnabled) || !app || fgPid == 0 || fgPid == GetCurrentProcessId()) {
         DisableAllChannels();
         return;
     }
@@ -46,7 +46,12 @@ static void ArbitrateForTarget(HWND targetHwnd, DWORD fgPid, const ModernAppTraf
         RtssProvider_Clear();
     }
 
-    // Channel B: Win32 Direct2D click-through companion micro-capsule
+    // Channel B: Win32 Direct2D click-through companion micro-capsule (only when OSD toggle is ON)
+    if (!g_dispCfg.osdEnabled) {
+        WindowOsd_Hide();
+        g_activeChannel = OVERLAY_CHANNEL_NONE;
+        return;
+    }
     WindowOsd_Update(targetHwnd, app, proxyEnabled, &g_dispCfg);
     g_activeChannel = WindowOsd_IsVisible() ? OVERLAY_CHANNEL_NATIVE : OVERLAY_CHANNEL_NONE;
 }
@@ -71,7 +76,7 @@ static void OnForegroundChanged(HWND newFgHwnd, void *user)
     DWORD fgPid = StatsManager_GetForegroundAppPid(&fgHwnd);
     if (!fgHwnd) fgHwnd = newFgHwnd;
 
-    if (!g_dispCfg.osdEnabled || fgPid == 0 || fgPid == GetCurrentProcessId()) {
+    if ((!g_dispCfg.osdEnabled && !g_dispCfg.rtssEnabled) || fgPid == 0 || fgPid == GetCurrentProcessId()) {
         DisableAllChannels();
         return;
     }
@@ -139,7 +144,7 @@ void OverlayDispatcher_SetConfig(const ModernUiConfig *cfg)
     g_dispCfg = *cfg;
     if (!g_dispInit) return;
 
-    if (!g_dispCfg.osdEnabled) {
+    if (!g_dispCfg.osdEnabled && !g_dispCfg.rtssEnabled) {
         DisableAllChannels();
     } else {
         OnStatsUpdated(StatsManager_GetLatest(), NULL);

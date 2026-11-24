@@ -82,7 +82,7 @@ $lnCore  = "$wdLib WinDivert.lib ws2_32.lib iphlpapi.lib advapi32.lib"
 $lnProf  = 'user32.lib advapi32.lib shell32.lib'
 $lnGui   = '/SUBSYSTEM:CONSOLE /ENTRY:wWinMainCRTStartup user32.lib gdi32.lib comctl32.lib shell32.lib comdlg32.lib winhttp.lib advapi32.lib dwmapi.lib uxtheme.lib ole32.lib uuid.lib d2d1.lib dwrite.lib'
 $prof    = 'gui\profile\profile.c'
-$modern  = @('gui\modern\stats_manager.c', 'gui\modern\d2d_renderer.c', 'gui\modern\rtss_provider.c', 'gui\modern\window_osd.c', 'gui\modern\overlay_dispatcher.c')
+$modern  = @('gui\modern\stats_manager.c', 'gui\modern\d2d_renderer.c', 'gui\modern\rtss_provider.c', 'gui\modern\window_osd.c', 'gui\modern\overlay_dispatcher.c', 'gui\modern\floating_capsule.c')
 $res     = "$Out\app.res"
 
 # n = name, src = sources, cl = compiler flags, link = linker arguments, ui = needs a desktop session

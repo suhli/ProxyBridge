@@ -76,6 +76,11 @@ typedef struct PBProfile {
     int      osdOffsetY;          // gap / fine-tune Y offset in px
     int      osdOpacity;          // 0..100 opacity percentage (default 90)
     int      osdSizePx;           // 14..48 capsule height in px (default 22)
+    int      osdBgTransparent;    // 1 = transparent OSD background
+    int      osdUseCustomBg;      // 1 = use osdBgColor
+    UINT32   osdBgColor;          // 0x00RRGGBB
+    int      osdUseCustomText;    // 1 = use osdTextColor
+    UINT32   osdTextColor;        // 0x00RRGGBB
     PBConfig cfg[PB_MAX_CFG];   int cfgCount;
     PBRule   rule[PB_MAX_RULE]; int ruleCount;
     PBFilter filter[PB_MAX_FILTER]; int filterCount;

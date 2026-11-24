@@ -298,6 +298,11 @@ void PB_ProfileDefaults(PBProfile* p, const wchar_t* name)
     p->osdOffsetY        = 4;
     p->osdOpacity        = 90;
     p->osdSizePx         = 22;
+    p->osdBgTransparent  = 0;
+    p->osdUseCustomBg    = 0;
+    p->osdBgColor        = 0x0018181Bu;
+    p->osdUseCustomText  = 0;
+    p->osdTextColor      = 0x00F4F4F5u;
 }
 
 // Makes proxy-config ids unique and non-zero and positions the allocator past every id in use.
@@ -363,8 +368,13 @@ void PB_ProfileLoad(const wchar_t* name, PBProfile* p)
         if (p->osdOffsetY < -400 || p->osdOffsetY > 400) p->osdOffsetY = 4;
         p->osdOpacity     = (int)json_long(root, "OsdOpacity", 90);
         if (p->osdOpacity < 0 || p->osdOpacity > 100) p->osdOpacity = 90;
-        p->osdSizePx      = (int)json_long(root, "OsdSizePx", 22);
+        p->osdSizePx        = (int)json_long(root, "OsdSizePx", 22);
         if (p->osdSizePx < 14 || p->osdSizePx > 48) p->osdSizePx = 22;
+        p->osdBgTransparent = json_bool(root, "OsdBgTransparent", 0);
+        p->osdUseCustomBg   = json_bool(root, "OsdUseCustomBg", 0);
+        p->osdBgColor       = (UINT32)json_long(root, "OsdBgColor", 0x0018181B) & 0x00FFFFFFu;
+        p->osdUseCustomText = json_bool(root, "OsdUseCustomText", 0);
+        p->osdTextColor     = (UINT32)json_long(root, "OsdTextColor", 0x00F4F4F5) & 0x00FFFFFFu;
 
         JVal* cfgs = json_get(root, "ProxyConfigs");
         if (cfgs && cfgs->type == J_ARR)
@@ -474,7 +484,12 @@ BOOL PB_ProfileSave(const wchar_t* name, const PBProfile* p)
             "  \"OsdOffsetX\": %d,\n"
             "  \"OsdOffsetY\": %d,\n"
             "  \"OsdOpacity\": %d,\n"
-            "  \"OsdSizePx\": %d,\n",
+            "  \"OsdSizePx\": %d,\n"
+            "  \"OsdBgTransparent\": %s,\n"
+            "  \"OsdUseCustomBg\": %s,\n"
+            "  \"OsdBgColor\": %u,\n"
+            "  \"OsdUseCustomText\": %s,\n"
+            "  \"OsdTextColor\": %u,\n",
             p->themeMode,
             p->capsuleEnabled ? "true" : "false",
             p->capsuleTopmost ? "true" : "false",
@@ -484,7 +499,12 @@ BOOL PB_ProfileSave(const wchar_t* name, const PBProfile* p)
             p->osdCompactMode ? "true" : "false",
             p->rtssEnabled    ? "true" : "false",
             p->osdAnchor, p->osdOffsetX, p->osdOffsetY,
-            p->osdOpacity, p->osdSizePx);
+            p->osdOpacity, p->osdSizePx,
+            p->osdBgTransparent ? "true" : "false",
+            p->osdUseCustomBg   ? "true" : "false",
+            (unsigned)(p->osdBgColor & 0x00FFFFFFu),
+            p->osdUseCustomText ? "true" : "false",
+            (unsigned)(p->osdTextColor & 0x00FFFFFFu));
         sb_put(&b, mb);
     }
 

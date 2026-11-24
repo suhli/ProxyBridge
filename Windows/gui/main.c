@@ -33,6 +33,7 @@
 #include "modern/d2d_renderer.h"
 #include "modern/window_osd.h"
 #include "modern/overlay_dispatcher.h"
+#include "modern/floating_capsule.h"
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "user32.lib")
@@ -98,8 +99,9 @@ static int       g_tbHot = -1;            // hovered menu-bar icon: 0 = settings
 #define IDC_CONN_SEARCH 3001
 #define IDC_CONN_CLEAR  3002
 #define IDC_ACT_SEARCH  3003
-#define IDC_ACT_CLEAR        3004
-#define IDM_SET_OSD_SETTINGS 3090
+#define IDC_ACT_CLEAR          3004
+#define IDM_SET_OSD_SETTINGS   3090
+#define IDM_SET_CAPSULE_TOGGLE 3091
 
 // Per-log line store so the search box can filter without losing lines. New lines append to
 // the edit only when they match the active filter; changing the filter re-renders from here.
@@ -339,6 +341,7 @@ static void SwitchToProfile(const wchar_t* name)
     if (g_profile.fontZoom != g_zoom) { g_zoom = g_profile.fontZoom; ApplyZoom(g_hMain); }
     SyncModernFromProfile();
     OverlayDispatcher_SetConfig(&g_modernCfg);
+    FloatingCapsule_ApplyConfig(&g_modernCfg);
     ApplyFilterSnapshot();
     g_api.SetTrafficLoggingEnabled(g_trafficLog);
     g_api.SetLogEveryConnection(g_logEvery);
@@ -384,8 +387,13 @@ static void SyncModernFromProfile(void)
     g_modernCfg.osdAnchor      = g_profile.osdAnchor;
     g_modernCfg.osdOffsetX     = g_profile.osdOffsetX;
     g_modernCfg.osdOffsetY     = g_profile.osdOffsetY;
-    g_modernCfg.osdOpacity     = g_profile.osdOpacity;
-    g_modernCfg.osdSizePx      = g_profile.osdSizePx;
+    g_modernCfg.osdOpacity       = g_profile.osdOpacity;
+    g_modernCfg.osdSizePx        = g_profile.osdSizePx;
+    g_modernCfg.osdBgTransparent = g_profile.osdBgTransparent != 0;
+    g_modernCfg.osdUseCustomBg   = g_profile.osdUseCustomBg != 0;
+    g_modernCfg.osdBgColor       = g_profile.osdBgColor;
+    g_modernCfg.osdUseCustomText = g_profile.osdUseCustomText != 0;
+    g_modernCfg.osdTextColor     = g_profile.osdTextColor;
     ModernUiConfig_Sanitize(&g_modernCfg);
 }
 
@@ -406,6 +414,11 @@ static void SyncModernToProfile(void)
     g_profile.osdOffsetY     = g_modernCfg.osdOffsetY;
     g_profile.osdOpacity     = g_modernCfg.osdOpacity;
     g_profile.osdSizePx      = g_modernCfg.osdSizePx;
+    g_profile.osdBgTransparent = g_modernCfg.osdBgTransparent ? 1 : 0;
+    g_profile.osdUseCustomBg   = g_modernCfg.osdUseCustomBg ? 1 : 0;
+    g_profile.osdBgColor       = g_modernCfg.osdBgColor & 0x00FFFFFFu;
+    g_profile.osdUseCustomText = g_modernCfg.osdUseCustomText ? 1 : 0;
+    g_profile.osdTextColor     = g_modernCfg.osdTextColor & 0x00FFFFFFu;
 }
 
 static void OnModernOsdCfgChanged(const ModernUiConfig* cfg, void* user)
@@ -416,6 +429,56 @@ static void OnModernOsdCfgChanged(const ModernUiConfig* cfg, void* user)
     SyncModernToProfile();
     SaveActive();
     OverlayDispatcher_SetConfig(&g_modernCfg);
+    FloatingCapsule_ApplyConfig(&g_modernCfg);
+}
+
+static void OnCapsulePosChanged(int x, int y, void* user)
+{
+    (void)user;
+    g_modernCfg.capsuleX = x;
+    g_modernCfg.capsuleY = y;
+    SyncModernToProfile();
+    SaveActive();
+}
+
+static void OnCapsuleAction(FloatingCapsuleAction action, void* user)
+{
+    (void)user;
+    switch (action)
+    {
+    case CAPSULE_ACTION_TOGGLE_PROXY:
+        SendMessageW(g_hMain, WM_COMMAND, IDM_PROXY_ENABLE, 0);
+        break;
+    case CAPSULE_ACTION_TOGGLE_TOPMOST:
+        g_modernCfg.capsuleTopmost = !g_modernCfg.capsuleTopmost;
+        SyncModernToProfile(); SaveActive();
+        FloatingCapsule_ApplyConfig(&g_modernCfg);
+        break;
+    case CAPSULE_ACTION_TOGGLE_OSD:
+        g_modernCfg.osdEnabled = !g_modernCfg.osdEnabled;
+        SyncModernToProfile(); SaveActive();
+        OverlayDispatcher_SetConfig(&g_modernCfg);
+        FloatingCapsule_ApplyConfig(&g_modernCfg);
+        break;
+    case CAPSULE_ACTION_OPEN_OSD_SETTINGS:
+        WindowOsd_ShowSettingsWindow(g_hMain, &g_modernCfg, OnModernOsdCfgChanged, NULL);
+        break;
+    case CAPSULE_ACTION_SHOW_MAIN:
+        ShowWindow(g_hMain, SW_SHOW);
+        ShowWindow(g_hMain, SW_RESTORE);
+        SetForegroundWindow(g_hMain);
+        break;
+    case CAPSULE_ACTION_HIDE_CAPSULE:
+        g_modernCfg.capsuleEnabled = FALSE;
+        SyncModernToProfile(); SaveActive();
+        FloatingCapsule_ApplyConfig(&g_modernCfg);
+        SyncMenuChecks(g_hMain);
+        break;
+    case CAPSULE_ACTION_EXIT_APP:
+        g_reallyExit = TRUE;
+        DestroyWindow(g_hMain);
+        break;
+    }
 }
 
 // Builds the whole menu bar from the string table so a language switch can rebuild it live.
@@ -450,7 +513,7 @@ static void BuildMainMenu(HWND hwnd)
     AppendMenuW(settings, MF_STRING, IDM_SET_AUTOCLEAR,   T(S_M_AUTOCLEAR));
     AppendMenuW(settings, MF_STRING, IDM_SET_LOGALL,      T(S_M_LOGALL));
     AppendMenuW(settings, MF_SEPARATOR, 0, NULL);
-    AppendMenuW(settings, MF_STRING, IDM_SET_OSD_SETTINGS, g_lang == 1 ? L"OSD 伴随浮窗设置..." : L"OSD Overlay Settings...");
+    AppendMenuW(settings, MF_STRING, IDM_SET_OSD_SETTINGS,   g_lang == 1 ? L"统计..." : L"Telemetry...");
     AppendMenuW(settings, MF_SEPARATOR, 0, NULL);
     AppendMenuW(settings, MF_STRING, IDM_ZOOM_IN,    T(S_M_ZOOM_IN));
     AppendMenuW(settings, MF_STRING, IDM_ZOOM_OUT,   T(S_M_ZOOM_OUT));
@@ -652,7 +715,8 @@ static void SyncMenuChecks(HWND hwnd)
     CheckMenuItem(m, IDM_SET_CLOSETOTRAY, MF_BYCOMMAND | (g_closeToTray? MF_CHECKED : MF_UNCHECKED));
     CheckMenuItem(m, IDM_SET_STARTUP,     MF_BYCOMMAND | (g_startup    ? MF_CHECKED : MF_UNCHECKED));
     CheckMenuItem(m, IDM_SET_AUTOCLEAR,   MF_BYCOMMAND | (g_autoClear  ? MF_CHECKED : MF_UNCHECKED));
-    CheckMenuItem(m, IDM_SET_LOGALL,      MF_BYCOMMAND | (g_logEvery   ? MF_CHECKED : MF_UNCHECKED));
+    CheckMenuItem(m, IDM_SET_LOGALL,         MF_BYCOMMAND | (g_logEvery   ? MF_CHECKED : MF_UNCHECKED));
+    CheckMenuItem(m, IDM_SET_CAPSULE_TOGGLE, MF_BYCOMMAND | (g_modernCfg.capsuleEnabled ? MF_CHECKED : MF_UNCHECKED));
     int zh = (_wcsicmp(g_profile.language, L"zh") == 0);
     CheckMenuItem(m, IDM_LANG_EN, MF_BYCOMMAND | (zh ? MF_UNCHECKED : MF_CHECKED));
     CheckMenuItem(m, IDM_LANG_ZH, MF_BYCOMMAND | (zh ? MF_CHECKED : MF_UNCHECKED));
@@ -784,6 +848,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         SyncModernFromProfile();
         D2d_Init();
         OverlayDispatcher_Init(g_hInst, &g_modernCfg);
+        FloatingCapsule_Init(g_hInst, &g_modernCfg, OnCapsuleAction, OnCapsulePosChanged, NULL);
+        FloatingCapsule_SetProxyEnabled(g_proxyEnabled);
         SetTimer(hwnd, TIMER_STATS, STATS_POLL_INTERVAL_MS, NULL);
 
         // Menu-bar quick-access icons are drawn on the (non-client) menu bar in WM_NCPAINT;
@@ -979,6 +1045,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             HMENU pm = CreatePopupMenu();
             AppendMenuW(pm, MF_STRING, IDM_TRAY_SHOW, T(S_TRAY_SHOW));
             AppendMenuW(pm, MF_STRING | (g_proxyEnabled ? MF_CHECKED : MF_UNCHECKED), IDM_PROXY_ENABLE, T(S_M_ENABLE));
+            AppendMenuW(pm, MF_STRING | (g_modernCfg.capsuleEnabled ? MF_CHECKED : MF_UNCHECKED), IDM_SET_CAPSULE_TOGGLE,
+                        g_lang == 1 ? L"显示桌面悬浮胶囊" : L"Show Floating Capsule");
             AppendMenuW(pm, MF_SEPARATOR, 0, NULL);
             AppendMenuW(pm, MF_STRING, IDM_TRAY_EXIT, T(S_TRAY_EXIT));
             SetForegroundWindow(hwnd);
@@ -1004,6 +1072,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case IDM_PROXY_ENABLE:
             g_proxyEnabled = !g_proxyEnabled;
             g_api.SetEnabled(g_proxyEnabled);
+            FloatingCapsule_SetProxyEnabled(g_proxyEnabled);
             UpdateTitle(); TrayUpdateTip(); SyncMenuChecks(hwnd);
             return 0;
         case IDM_SET_TRAFFICLOG:
@@ -1022,6 +1091,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case IDM_SET_AUTOCLEAR:
             g_autoClear = !g_autoClear; g_profile.autoClearLogs = g_autoClear;
             SaveActive(); SyncMenuChecks(hwnd); return 0;
+        case IDM_SET_CAPSULE_TOGGLE:
+            g_modernCfg.capsuleEnabled = !g_modernCfg.capsuleEnabled;
+            SyncModernToProfile(); SaveActive();
+            FloatingCapsule_ApplyConfig(&g_modernCfg);
+            SyncMenuChecks(hwnd);
+            return 0;
         case IDM_SET_OSD_SETTINGS:
             WindowOsd_ShowSettingsWindow(hwnd, &g_modernCfg, OnModernOsdCfgChanged, NULL);
             return 0;
@@ -1124,6 +1199,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (g_api.Stop) g_api.Stop();
         TrayRemove();
         KillTimer(hwnd, TIMER_STATS);
+        FloatingCapsule_Shutdown();
         OverlayDispatcher_Shutdown();
         StatsManager_Shutdown();
         D2d_Shutdown();
