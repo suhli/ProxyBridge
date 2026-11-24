@@ -298,6 +298,7 @@ void PB_ProfileDefaults(PBProfile* p, const wchar_t* name)
     p->osdOffsetY        = 4;
     p->osdOpacity        = 90;
     p->osdSizePx         = 22;
+    p->osdFontWeight     = 400;
     p->osdBgTransparent  = 0;
     p->osdUseCustomBg    = 0;
     p->osdBgColor        = 0x0018181Bu;
@@ -370,6 +371,9 @@ void PB_ProfileLoad(const wchar_t* name, PBProfile* p)
         if (p->osdOpacity < 0 || p->osdOpacity > 100) p->osdOpacity = 90;
         p->osdSizePx        = (int)json_long(root, "OsdSizePx", 22);
         if (p->osdSizePx < 14 || p->osdSizePx > 48) p->osdSizePx = 22;
+        p->osdFontWeight    = (int)json_long(root, "OsdFontWeight", 400);
+        if (p->osdFontWeight != 300 && p->osdFontWeight != 400 && p->osdFontWeight != 500 &&
+            p->osdFontWeight != 600 && p->osdFontWeight != 700) p->osdFontWeight = 400;
         p->osdBgTransparent = json_bool(root, "OsdBgTransparent", 0);
         p->osdUseCustomBg   = json_bool(root, "OsdUseCustomBg", 0);
         p->osdBgColor       = (UINT32)json_long(root, "OsdBgColor", 0x0018181B) & 0x00FFFFFFu;
@@ -485,6 +489,7 @@ BOOL PB_ProfileSave(const wchar_t* name, const PBProfile* p)
             "  \"OsdOffsetY\": %d,\n"
             "  \"OsdOpacity\": %d,\n"
             "  \"OsdSizePx\": %d,\n"
+            "  \"OsdFontWeight\": %d,\n"
             "  \"OsdBgTransparent\": %s,\n"
             "  \"OsdUseCustomBg\": %s,\n"
             "  \"OsdBgColor\": %u,\n"
@@ -499,7 +504,7 @@ BOOL PB_ProfileSave(const wchar_t* name, const PBProfile* p)
             p->osdCompactMode ? "true" : "false",
             p->rtssEnabled    ? "true" : "false",
             p->osdAnchor, p->osdOffsetX, p->osdOffsetY,
-            p->osdOpacity, p->osdSizePx,
+            p->osdOpacity, p->osdSizePx, p->osdFontWeight,
             p->osdBgTransparent ? "true" : "false",
             p->osdUseCustomBg   ? "true" : "false",
             (unsigned)(p->osdBgColor & 0x00FFFFFFu),

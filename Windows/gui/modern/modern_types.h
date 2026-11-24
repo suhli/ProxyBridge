@@ -71,6 +71,7 @@ extern "C" {
 #define MODERN_OSD_DEFAULT_SIZE_PX      22
 #define MODERN_OSD_MIN_SIZE_PX          14
 #define MODERN_OSD_MAX_SIZE_PX          48
+#define MODERN_OSD_DEFAULT_FONT_WEIGHT  400
 #define MODERN_POS_UNSET                INT_MIN
 
 // Data limits
@@ -108,6 +109,7 @@ typedef struct {
     int  osdOffsetY;        // Gap / fine-tune Y offset in px (default 4)
     int  osdOpacity;        // Opacity percentage 0..100 (default 90)
     int  osdSizePx;         // Capsule height in px 14..48 (default 22)
+    int  osdFontWeight;     // DirectWrite font weight: 300, 400, 500, 600, 700 (default 400)
     BOOL osdBgTransparent;  // TRUE = completely transparent background (text & dot only)
     BOOL osdUseCustomBg;    // TRUE = use osdBgColor instead of theme default
     uint32_t osdBgColor;    // Custom background RGB (0x00RRGGBB, default 0x18181B)
@@ -165,6 +167,7 @@ static __inline void ModernUiConfig_Defaults(ModernUiConfig *cfg)
     cfg->osdOffsetY     = MODERN_OSD_DEFAULT_OFFSET_Y;
     cfg->osdOpacity       = MODERN_OSD_DEFAULT_OPACITY;
     cfg->osdSizePx        = MODERN_OSD_DEFAULT_SIZE_PX;
+    cfg->osdFontWeight    = MODERN_OSD_DEFAULT_FONT_WEIGHT;
     cfg->osdBgTransparent = FALSE;
     cfg->osdUseCustomBg   = FALSE;
     cfg->osdBgColor       = 0x0018181Bu;
@@ -185,6 +188,10 @@ static __inline void ModernUiConfig_Sanitize(ModernUiConfig *cfg)
     if (cfg->osdOpacity > MODERN_OSD_MAX_OPACITY) cfg->osdOpacity = MODERN_OSD_MAX_OPACITY;
     if (cfg->osdSizePx  < MODERN_OSD_MIN_SIZE_PX) cfg->osdSizePx  = MODERN_OSD_MIN_SIZE_PX;
     if (cfg->osdSizePx  > MODERN_OSD_MAX_SIZE_PX) cfg->osdSizePx  = MODERN_OSD_MAX_SIZE_PX;
+    if (cfg->osdFontWeight != 300 && cfg->osdFontWeight != 400 && cfg->osdFontWeight != 500 &&
+        cfg->osdFontWeight != 600 && cfg->osdFontWeight != 700) {
+        cfg->osdFontWeight = MODERN_OSD_DEFAULT_FONT_WEIGHT;
+    }
     cfg->osdBgColor   &= 0x00FFFFFFu;
     cfg->osdTextColor &= 0x00FFFFFFu;
 }

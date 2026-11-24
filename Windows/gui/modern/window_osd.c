@@ -23,26 +23,25 @@
 #define OSD_SET_CLASS     L"ProxyBridgeModernOsdSettingsWnd"
 #define OSD_EX_STYLES     (WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_TOOLWINDOW)
 
-#define IDC_OSD_CHK_CAPSULE   4100
-#define IDC_OSD_CHK_CAP_TOP   4113
-#define IDC_OSD_CHK_ENABLE    4101
-#define IDC_OSD_CHK_RTSS      4102
-#define IDC_OSD_CHK_COMPACT   4103
-#define IDC_OSD_CMB_ANCHOR    4104
+#define IDC_OSD_CMB_MODE      4100
+#define IDC_OSD_CMB_CAP_TOP   4101
+#define IDC_OSD_CMB_COMPACT   4102
+#define IDC_OSD_CMB_ANCHOR    4103
+#define IDC_OSD_CMB_WEIGHT    4104
 #define IDC_OSD_SLD_OPACITY   4105
 #define IDC_OSD_EDT_OPACITY   4106
 #define IDC_OSD_SLD_SIZE      4107
 #define IDC_OSD_EDT_SIZE      4108
 #define IDC_OSD_EDT_OFFX      4109
 #define IDC_OSD_EDT_OFFY      4110
-#define IDC_OSD_BTN_BG_PICK   4114
-#define IDC_OSD_CHK_BG_TRANS  4115
+#define IDC_OSD_CMB_BG_MODE   4111
+#define IDC_OSD_SWATCH_BG     4112
+#define IDC_OSD_BTN_BG_PICK   4113
+#define IDC_OSD_CMB_TXT_MODE  4114
+#define IDC_OSD_SWATCH_TXT    4115
 #define IDC_OSD_BTN_TXT_PICK  4116
-#define IDC_OSD_BTN_COL_DEF   4117
-#define IDC_OSD_SWATCH_BG     4118
-#define IDC_OSD_SWATCH_TXT    4119
-#define IDC_OSD_BTN_RESET     4111
-#define IDC_OSD_BTN_CLOSE     4112
+#define IDC_OSD_BTN_RESET     4117
+#define IDC_OSD_BTN_CLOSE     4118
 
 static HINSTANCE                   g_osdInst = NULL;
 static BOOL                        g_osdClassReg = FALSE;
@@ -355,7 +354,7 @@ static void RenderOsdForWindow(HWND targetHwnd, const ModernAppTraffic *app, BOO
     }
 
     // Measure stable segment widths in DIPs (minimum widths avoid pill horizontal jitter)
-    const D2dFontSlot font = D2D_FONT_MONO_11;
+    const D2dFontSlot font = D2d_Mono11ForWeight(safeCfg.osdFontWeight);
     float wRtt = D2d_MeasureTextWidth(font, rttStr, TRUE);
     float wDn  = D2d_MeasureTextWidth(font, dnSeg, TRUE);
     float wUp  = D2d_MeasureTextWidth(font, upSeg, TRUE);
@@ -510,28 +509,65 @@ static uint32_t ColorRefToRgb24(COLORREF cr)
     return ((uint32_t)GetRValue(cr) << 16) | ((uint32_t)GetGValue(cr) << 8) | (uint32_t)GetBValue(cr);
 }
 
+static int ModeIndexFromCfg(const ModernUiConfig *c)
+{
+    int mask = (c->capsuleEnabled ? 1 : 0) | (c->osdEnabled ? 2 : 0) | (c->rtssEnabled ? 4 : 0);
+    // Ordered intuitively for the user:
+    // 0: None (0), 1: Capsule (1), 2: OSD (2), 3: RTSS (4),
+    // 4: Capsule+OSD (3), 5: OSD+RTSS (6), 6: Capsule+RTSS (5), 7: All 3 (7)
+    static const int kMaskToIdx[8] = { 0, 1, 2, 4, 3, 6, 5, 7 };
+    return kMaskToIdx[mask & 7];
+}
+
+static void ApplyModeIndexToCfg(int idx, ModernUiConfig *c)
+{
+    static const int kIdxToMask[8] = { 0, 1, 2, 4, 3, 6, 5, 7 };
+    if (idx < 0 || idx > 7) idx = 7;
+    int mask = kIdxToMask[idx];
+    c->capsuleEnabled = (mask & 1) != 0;
+    c->osdEnabled     = (mask & 2) != 0;
+    c->rtssEnabled    = (mask & 4) != 0;
+}
+
+static int WeightToIndex(int w)
+{
+    if (w <= 300) return 0;
+    if (w <= 400) return 1;
+    if (w <= 500) return 2;
+    if (w <= 600) return 3;
+    return 4;
+}
+
+static int IndexToWeight(int idx)
+{
+    static const int kWeights[5] = { 300, 400, 500, 600, 700 };
+    if (idx < 0 || idx > 4) return 400;
+    return kWeights[idx];
+}
+
 static void UpdateOsdControlsEnabledState(HWND hwnd)
 {
     if (!g_setCfgPtr) return;
-    BOOL capOn = g_setCfgPtr->capsuleEnabled ? TRUE : FALSE;
-    BOOL osdOn = g_setCfgPtr->osdEnabled ? TRUE : FALSE;
-    BOOL bgTrans = g_setCfgPtr->osdBgTransparent ? TRUE : FALSE;
+    BOOL capOn   = g_setCfgPtr->capsuleEnabled ? TRUE : FALSE;
+    BOOL osdOn   = g_setCfgPtr->osdEnabled ? TRUE : FALSE;
+    BOOL bgCust  = (!g_setCfgPtr->osdBgTransparent && g_setCfgPtr->osdUseCustomBg);
+    BOOL txtCust = g_setCfgPtr->osdUseCustomText;
 
-    EnableWindow(GetDlgItem(hwnd, IDC_OSD_CHK_CAP_TOP), capOn);
+    EnableWindow(GetDlgItem(hwnd, IDC_OSD_CMB_CAP_TOP), capOn);
 
     static const int kOsdIds[] = {
-        IDC_OSD_CHK_COMPACT, IDC_OSD_CMB_ANCHOR,
+        IDC_OSD_CMB_COMPACT, IDC_OSD_CMB_ANCHOR, IDC_OSD_CMB_WEIGHT,
         IDC_OSD_SLD_OPACITY, IDC_OSD_EDT_OPACITY,
         IDC_OSD_SLD_SIZE,    IDC_OSD_EDT_SIZE,
         IDC_OSD_EDT_OFFX,    IDC_OSD_EDT_OFFY,
-        IDC_OSD_CHK_BG_TRANS,
-        IDC_OSD_BTN_TXT_PICK, IDC_OSD_BTN_COL_DEF,
-        IDC_OSD_SWATCH_BG,    IDC_OSD_SWATCH_TXT
+        IDC_OSD_CMB_BG_MODE, IDC_OSD_SWATCH_BG,
+        IDC_OSD_CMB_TXT_MODE, IDC_OSD_SWATCH_TXT
     };
     for (size_t i = 0; i < ARRAYSIZE(kOsdIds); i++) {
         EnableWindow(GetDlgItem(hwnd, kOsdIds[i]), osdOn);
     }
-    EnableWindow(GetDlgItem(hwnd, IDC_OSD_BTN_BG_PICK), osdOn && !bgTrans);
+    EnableWindow(GetDlgItem(hwnd, IDC_OSD_BTN_BG_PICK),  osdOn && bgCust);
+    EnableWindow(GetDlgItem(hwnd, IDC_OSD_BTN_TXT_PICK), osdOn && txtCust);
 
     InvalidateRect(GetDlgItem(hwnd, IDC_OSD_SWATCH_BG), NULL, TRUE);
     InvalidateRect(GetDlgItem(hwnd, IDC_OSD_SWATCH_TXT), NULL, TRUE);
@@ -543,15 +579,18 @@ static void SyncControlsFromConfig(HWND hwnd)
     ModernUiConfig_Sanitize(g_setCfgPtr);
     g_setSyncing = TRUE;
 
-    CheckDlgButton(hwnd, IDC_OSD_CHK_CAPSULE,  g_setCfgPtr->capsuleEnabled   ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(hwnd, IDC_OSD_CHK_CAP_TOP,  g_setCfgPtr->capsuleTopmost   ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(hwnd, IDC_OSD_CHK_ENABLE,   g_setCfgPtr->osdEnabled       ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(hwnd, IDC_OSD_CHK_RTSS,     g_setCfgPtr->rtssEnabled      ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(hwnd, IDC_OSD_CHK_COMPACT,  g_setCfgPtr->osdCompactMode   ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(hwnd, IDC_OSD_CHK_BG_TRANS, g_setCfgPtr->osdBgTransparent ? BST_CHECKED : BST_UNCHECKED);
+    SendDlgItemMessageW(hwnd, IDC_OSD_CMB_MODE,    CB_SETCURSEL, (WPARAM)ModeIndexFromCfg(g_setCfgPtr), 0);
+    SendDlgItemMessageW(hwnd, IDC_OSD_CMB_CAP_TOP, CB_SETCURSEL, (WPARAM)(g_setCfgPtr->capsuleTopmost ? 0 : 1), 0);
+    SendDlgItemMessageW(hwnd, IDC_OSD_CMB_COMPACT, CB_SETCURSEL, (WPARAM)(g_setCfgPtr->osdCompactMode ? 1 : 0), 0);
     SendDlgItemMessageW(hwnd, IDC_OSD_CMB_ANCHOR,  CB_SETCURSEL, (WPARAM)g_setCfgPtr->osdAnchor, 0);
+    SendDlgItemMessageW(hwnd, IDC_OSD_CMB_WEIGHT,  CB_SETCURSEL, (WPARAM)WeightToIndex(g_setCfgPtr->osdFontWeight), 0);
     SendDlgItemMessageW(hwnd, IDC_OSD_SLD_OPACITY, TBM_SETPOS, TRUE, (LPARAM)g_setCfgPtr->osdOpacity);
     SendDlgItemMessageW(hwnd, IDC_OSD_SLD_SIZE,    TBM_SETPOS, TRUE, (LPARAM)g_setCfgPtr->osdSizePx);
+
+    int bgMode = g_setCfgPtr->osdBgTransparent ? 2 : (g_setCfgPtr->osdUseCustomBg ? 1 : 0);
+    int txtMode = g_setCfgPtr->osdUseCustomText ? 1 : 0;
+    SendDlgItemMessageW(hwnd, IDC_OSD_CMB_BG_MODE,  CB_SETCURSEL, (WPARAM)bgMode, 0);
+    SendDlgItemMessageW(hwnd, IDC_OSD_CMB_TXT_MODE, CB_SETCURSEL, (WPARAM)txtMode, 0);
 
     wchar_t buf[32];
     _snwprintf_s(buf, ARRAYSIZE(buf), _TRUNCATE, L"%d", g_setCfgPtr->osdOpacity);
@@ -581,15 +620,24 @@ static void ReadConfigAndApplyLive(HWND hwnd, BOOL fromSliders, BOOL clampInputs
 {
     if (g_setSyncing || !g_setCfgPtr) return;
 
-    g_setCfgPtr->capsuleEnabled   = (IsDlgButtonChecked(hwnd, IDC_OSD_CHK_CAPSULE)  == BST_CHECKED);
-    g_setCfgPtr->capsuleTopmost   = (IsDlgButtonChecked(hwnd, IDC_OSD_CHK_CAP_TOP)  == BST_CHECKED);
-    g_setCfgPtr->osdEnabled       = (IsDlgButtonChecked(hwnd, IDC_OSD_CHK_ENABLE)   == BST_CHECKED);
-    g_setCfgPtr->rtssEnabled      = (IsDlgButtonChecked(hwnd, IDC_OSD_CHK_RTSS)     == BST_CHECKED);
-    g_setCfgPtr->osdCompactMode   = (IsDlgButtonChecked(hwnd, IDC_OSD_CHK_COMPACT)  == BST_CHECKED);
-    g_setCfgPtr->osdBgTransparent = (IsDlgButtonChecked(hwnd, IDC_OSD_CHK_BG_TRANS) == BST_CHECKED);
+    int modeIdx = (int)SendDlgItemMessageW(hwnd, IDC_OSD_CMB_MODE, CB_GETCURSEL, 0, 0);
+    ApplyModeIndexToCfg(modeIdx, g_setCfgPtr);
 
-    int sel = (int)SendDlgItemMessageW(hwnd, IDC_OSD_CMB_ANCHOR, CB_GETCURSEL, 0, 0);
-    if (sel >= 0 && sel < MODERN_OSD_ANCHOR_COUNT) g_setCfgPtr->osdAnchor = sel;
+    g_setCfgPtr->capsuleTopmost = ((int)SendDlgItemMessageW(hwnd, IDC_OSD_CMB_CAP_TOP, CB_GETCURSEL, 0, 0) == 0);
+    g_setCfgPtr->osdCompactMode = ((int)SendDlgItemMessageW(hwnd, IDC_OSD_CMB_COMPACT, CB_GETCURSEL, 0, 0) == 1);
+
+    int anchorSel = (int)SendDlgItemMessageW(hwnd, IDC_OSD_CMB_ANCHOR, CB_GETCURSEL, 0, 0);
+    if (anchorSel >= 0 && anchorSel < MODERN_OSD_ANCHOR_COUNT) g_setCfgPtr->osdAnchor = anchorSel;
+
+    int weightSel = (int)SendDlgItemMessageW(hwnd, IDC_OSD_CMB_WEIGHT, CB_GETCURSEL, 0, 0);
+    g_setCfgPtr->osdFontWeight = IndexToWeight(weightSel);
+
+    int bgMode = (int)SendDlgItemMessageW(hwnd, IDC_OSD_CMB_BG_MODE, CB_GETCURSEL, 0, 0);
+    g_setCfgPtr->osdBgTransparent = (bgMode == 2);
+    g_setCfgPtr->osdUseCustomBg   = (bgMode == 1);
+
+    int txtMode = (int)SendDlgItemMessageW(hwnd, IDC_OSD_CMB_TXT_MODE, CB_GETCURSEL, 0, 0);
+    g_setCfgPtr->osdUseCustomText = (txtMode == 1);
 
     wchar_t buf[32];
     if (fromSliders) {
@@ -602,7 +650,6 @@ static void ReadConfigAndApplyLive(HWND hwnd, BOOL fromSliders, BOOL clampInputs
         SetDlgItemTextW(hwnd, IDC_OSD_EDT_SIZE, buf);
         g_setSyncing = FALSE;
     } else {
-        // Parse manual opacity input (0..100)
         GetDlgItemTextW(hwnd, IDC_OSD_EDT_OPACITY, buf, ARRAYSIZE(buf));
         if (buf[0] != L'\0') {
             int v = _wtoi(buf);
@@ -619,7 +666,6 @@ static void ReadConfigAndApplyLive(HWND hwnd, BOOL fromSliders, BOOL clampInputs
                 g_setSyncing = FALSE;
             }
         }
-        // Parse manual size px input (14..48)
         GetDlgItemTextW(hwnd, IDC_OSD_EDT_SIZE, buf, ARRAYSIZE(buf));
         if (buf[0] != L'\0') {
             int v = _wtoi(buf);
@@ -667,6 +713,11 @@ static BOOL PickColorDialog(HWND owner, uint32_t *inOutRgb24)
     return TRUE;
 }
 
+static BOOL IsSetDark(void)
+{
+    return D2d_ResolveDarkMode(g_setCfgPtr ? g_setCfgPtr->themeMode : MODERN_THEME_SYSTEM);
+}
+
 static HWND MakeCtrl(HWND parent, const wchar_t *cls, const wchar_t *text, DWORD style,
                      DWORD exStyle, int x, int y, int w, int h, int id)
 {
@@ -674,18 +725,24 @@ static HWND MakeCtrl(HWND parent, const wchar_t *cls, const wchar_t *text, DWORD
                              x, y, w, h, parent, (HMENU)(UINT_PTR)id, g_osdInst, NULL);
     if (c) {
         if (g_setFont) SendMessageW(c, WM_SETFONT, (WPARAM)g_setFont, TRUE);
+        BOOL dark = IsSetDark();
         if (_wcsicmp(cls, L"BUTTON") == 0) {
             DWORD bt = style & BS_TYPEMASK;
-            if (bt == BS_AUTOCHECKBOX || bt == BS_CHECKBOX) {
-                SetWindowTheme(c, L"", L"");
-            } else if (bt != BS_OWNERDRAW) {
-                SetWindowTheme(c, L"DarkMode_Explorer", NULL);
+            if (bt != BS_OWNERDRAW) {
+                SetWindowTheme(c, dark ? L"DarkMode_Explorer" : L"Explorer", NULL);
             }
         } else if (_wcsicmp(cls, L"EDIT") == 0 || _wcsicmp(cls, WC_COMBOBOXW) == 0) {
-            SetWindowTheme(c, L"DarkMode_CFD", NULL);
+            SetWindowTheme(c, dark ? L"DarkMode_CFD" : L"CFD", NULL);
         }
     }
     return c;
+}
+
+static void PopulateCombo(HWND cmb, const wchar_t *const *items, size_t count)
+{
+    for (size_t i = 0; i < count; i++) {
+        SendMessageW(cmb, CB_ADDSTRING, 0, (LPARAM)items[i]);
+    }
 }
 
 static LRESULT CALLBACK OsdSettingsWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
@@ -693,28 +750,46 @@ static LRESULT CALLBACK OsdSettingsWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARA
     switch (msg) {
     case WM_CREATE:
     {
+        BOOL dark = IsSetDark();
         g_setFont = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                 CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-        g_setBgBrush   = CreateSolidBrush(MODERN_RGB_BG_DARK);
-        g_setEditBrush = CreateSolidBrush(MODERN_RGB_CARD_DARK);
-        D2d_ApplyWindowDwm(hwnd, TRUE, FALSE, TRUE);
+        g_setBgBrush   = CreateSolidBrush(dark ? MODERN_RGB_BG_DARK   : MODERN_RGB_BG_LIGHT);
+        g_setEditBrush = CreateSolidBrush(dark ? MODERN_RGB_CARD_DARK : MODERN_RGB_CARD_LIGHT);
+        D2d_ApplyWindowDwm(hwnd, dark, FALSE, TRUE);
 
         int y = 14;
-        MakeCtrl(hwnd, L"STATIC", L"显示方式（可多选独立开关）:", 0, 0, 16, y, 260, 20, 0);
-        y += 24;
-        // 3 independent display toggles: 1. Desktop Floating Capsule  2. OSD  3. RTSS
-        MakeCtrl(hwnd, L"BUTTON", L"1. 桌面悬浮", BS_AUTOCHECKBOX | WS_TABSTOP, 0, 16, y, 102, 22, IDC_OSD_CHK_CAPSULE);
-        MakeCtrl(hwnd, L"BUTTON", L"置顶", BS_AUTOCHECKBOX | WS_TABSTOP, 0, 122, y, 56, 22, IDC_OSD_CHK_CAP_TOP);
-        MakeCtrl(hwnd, L"BUTTON", L"2. OSD", BS_AUTOCHECKBOX | WS_TABSTOP, 0, 194, y, 76, 22, IDC_OSD_CHK_ENABLE);
-        MakeCtrl(hwnd, L"BUTTON", L"3. RTSS", BS_AUTOCHECKBOX | WS_TABSTOP, 0, 280, y, 82, 22, IDC_OSD_CHK_RTSS);
+        MakeCtrl(hwnd, L"STATIC", L"显示方式:", 0, 0, 16, y + 3, 76, 20, 0);
+        HWND cmbMode = MakeCtrl(hwnd, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 0, 96, y, 280, 220, IDC_OSD_CMB_MODE);
+        static const wchar_t *const kModes[] = {
+            L"关闭统计显示",
+            L"仅桌面悬浮",
+            L"仅 OSD (应用伴随)",
+            L"仅 RTSS (3D/全屏)",
+            L"桌面悬浮 + OSD",
+            L"OSD + RTSS (自动互斥)",
+            L"桌面悬浮 + RTSS",
+            L"全部启用 (桌面悬浮 + OSD + RTSS)"
+        };
+        PopulateCombo(cmbMode, kModes, ARRAYSIZE(kModes));
         y += 32;
 
-        MakeCtrl(hwnd, L"STATIC", L"─── OSD 配置（勾选 OSD 时可调整）────────────────", 0, 0, 16, y, 366, 18, 0);
+        MakeCtrl(hwnd, L"STATIC", L"悬浮置顶:", 0, 0, 16, y + 3, 76, 20, 0);
+        HWND cmbTop = MakeCtrl(hwnd, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP, 0, 96, y, 120, 100, IDC_OSD_CMB_CAP_TOP);
+        static const wchar_t *const kTops[] = { L"始终置顶", L"普通窗口层级" };
+        PopulateCombo(cmbTop, kTops, ARRAYSIZE(kTops));
+
+        MakeCtrl(hwnd, L"STATIC", L"OSD 模板:", 0, 0, 228, y + 3, 66, 20, 0);
+        HWND cmbTpl = MakeCtrl(hwnd, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP, 0, 296, y, 80, 100, IDC_OSD_CMB_COMPACT);
+        static const wchar_t *const kTpls[] = { L"标准", L"精简" };
+        PopulateCombo(cmbTpl, kTpls, ARRAYSIZE(kTpls));
+        y += 34;
+
+        MakeCtrl(hwnd, L"STATIC", L"─── OSD 详细配置（启用 OSD 时可调整）───────────", 0, 0, 16, y, 366, 18, 0);
         y += 26;
 
         MakeCtrl(hwnd, L"STATIC", L"锚点位置:", 0, 0, 16, y + 3, 76, 20, 0);
-        HWND cmb = MakeCtrl(hwnd, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 0, 96, y, 184, 180, IDC_OSD_CMB_ANCHOR);
+        HWND cmbAnchor = MakeCtrl(hwnd, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 0, 96, y, 168, 180, IDC_OSD_CMB_ANCHOR);
         static const wchar_t *const kAnchors[MODERN_OSD_ANCHOR_COUNT] = {
             L"应用外左上角 (默认)",
             L"应用外右上角",
@@ -723,51 +798,57 @@ static LRESULT CALLBACK OsdSettingsWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARA
             L"应用内左下角",
             L"应用内右下角"
         };
-        for (int i = 0; i < MODERN_OSD_ANCHOR_COUNT; i++) {
-            SendMessageW(cmb, CB_ADDSTRING, 0, (LPARAM)kAnchors[i]);
-        }
-        MakeCtrl(hwnd, L"BUTTON", L"精简模式", BS_AUTOCHECKBOX | WS_TABSTOP, 0, 290, y + 2, 88, 22, IDC_OSD_CHK_COMPACT);
+        PopulateCombo(cmbAnchor, kAnchors, ARRAYSIZE(kAnchors));
+
+        MakeCtrl(hwnd, L"STATIC", L"字重:", 0, 0, 270, y + 3, 38, 20, 0);
+        HWND cmbWeight = MakeCtrl(hwnd, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 0, 310, y, 66, 160, IDC_OSD_CMB_WEIGHT);
+        static const wchar_t *const kWeights[] = { L"细体", L"常规", L"中等", L"半粗", L"粗体" };
+        PopulateCombo(cmbWeight, kWeights, ARRAYSIZE(kWeights));
         y += 34;
 
         MakeCtrl(hwnd, L"STATIC", L"不透明度:", 0, 0, 16, y + 4, 76, 20, 0);
-        HWND sldOp = MakeCtrl(hwnd, TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_NOTICKS | WS_TABSTOP, 0, 94, y, 198, 26, IDC_OSD_SLD_OPACITY);
+        HWND sldOp = MakeCtrl(hwnd, TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_NOTICKS | WS_TABSTOP, 0, 94, y, 204, 26, IDC_OSD_SLD_OPACITY);
         SendMessageW(sldOp, TBM_SETRANGE, TRUE, MAKELPARAM(MODERN_OSD_MIN_OPACITY, MODERN_OSD_MAX_OPACITY));
-        MakeCtrl(hwnd, L"EDIT", L"90", ES_NUMBER | ES_RIGHT | WS_BORDER | WS_TABSTOP, 0, 298, y + 1, 48, 24, IDC_OSD_EDT_OPACITY);
-        MakeCtrl(hwnd, L"STATIC", L"%", 0, 0, 350, y + 4, 22, 20, 0);
+        MakeCtrl(hwnd, L"EDIT", L"90", ES_NUMBER | ES_RIGHT | WS_BORDER | WS_TABSTOP, 0, 304, y + 1, 48, 24, IDC_OSD_EDT_OPACITY);
+        MakeCtrl(hwnd, L"STATIC", L"%", 0, 0, 356, y + 4, 20, 20, 0);
         y += 32;
 
         MakeCtrl(hwnd, L"STATIC", L"胶囊高度:", 0, 0, 16, y + 4, 76, 20, 0);
-        HWND sldSz = MakeCtrl(hwnd, TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_NOTICKS | WS_TABSTOP, 0, 94, y, 198, 26, IDC_OSD_SLD_SIZE);
+        HWND sldSz = MakeCtrl(hwnd, TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_NOTICKS | WS_TABSTOP, 0, 94, y, 204, 26, IDC_OSD_SLD_SIZE);
         SendMessageW(sldSz, TBM_SETRANGE, TRUE, MAKELPARAM(MODERN_OSD_MIN_SIZE_PX, MODERN_OSD_MAX_SIZE_PX));
-        MakeCtrl(hwnd, L"EDIT", L"22", ES_NUMBER | ES_RIGHT | WS_BORDER | WS_TABSTOP, 0, 298, y + 1, 48, 24, IDC_OSD_EDT_SIZE);
-        MakeCtrl(hwnd, L"STATIC", L"px", 0, 0, 350, y + 4, 24, 20, 0);
+        MakeCtrl(hwnd, L"EDIT", L"22", ES_NUMBER | ES_RIGHT | WS_BORDER | WS_TABSTOP, 0, 304, y + 1, 48, 24, IDC_OSD_EDT_SIZE);
+        MakeCtrl(hwnd, L"STATIC", L"px", 0, 0, 356, y + 4, 22, 20, 0);
         y += 34;
 
         MakeCtrl(hwnd, L"STATIC", L"X 偏移 (px):", 0, 0, 16, y + 3, 76, 20, 0);
-        MakeCtrl(hwnd, L"EDIT", L"0", ES_AUTOHSCROLL | ES_RIGHT | WS_BORDER | WS_TABSTOP, 0, 96, y, 76, 24, IDC_OSD_EDT_OFFX);
-        MakeCtrl(hwnd, L"STATIC", L"Y 间距 (px):", 0, 0, 194, y + 3, 78, 20, 0);
-        MakeCtrl(hwnd, L"EDIT", L"4", ES_AUTOHSCROLL | ES_RIGHT | WS_BORDER | WS_TABSTOP, 0, 276, y, 76, 24, IDC_OSD_EDT_OFFY);
-        y += 36;
-
-        // Background color picker + completely transparent toggle
-        MakeCtrl(hwnd, L"STATIC", L"背景色:", 0, 0, 16, y + 4, 76, 20, 0);
-        MakeCtrl(hwnd, L"BUTTON", L"", BS_OWNERDRAW, 0, 96, y + 1, 28, 24, IDC_OSD_SWATCH_BG);
-        MakeCtrl(hwnd, L"BUTTON", L"选择颜色...", BS_PUSHBUTTON | WS_TABSTOP, 0, 132, y, 96, 26, IDC_OSD_BTN_BG_PICK);
-        MakeCtrl(hwnd, L"BUTTON", L"完全透明", BS_AUTOCHECKBOX | WS_TABSTOP, 0, 242, y + 2, 100, 22, IDC_OSD_CHK_BG_TRANS);
+        MakeCtrl(hwnd, L"EDIT", L"0", ES_AUTOHSCROLL | ES_RIGHT | WS_BORDER | WS_TABSTOP, 0, 96, y, 80, 24, IDC_OSD_EDT_OFFX);
+        MakeCtrl(hwnd, L"STATIC", L"Y 间距 (px):", 0, 0, 210, y + 3, 78, 20, 0);
+        MakeCtrl(hwnd, L"EDIT", L"4", ES_AUTOHSCROLL | ES_RIGHT | WS_BORDER | WS_TABSTOP, 0, 294, y, 82, 24, IDC_OSD_EDT_OFFY);
         y += 34;
 
-        // Font color picker + reset to theme colors
-        MakeCtrl(hwnd, L"STATIC", L"字体颜色:", 0, 0, 16, y + 4, 76, 20, 0);
-        MakeCtrl(hwnd, L"BUTTON", L"", BS_OWNERDRAW, 0, 96, y + 1, 28, 24, IDC_OSD_SWATCH_TXT);
-        MakeCtrl(hwnd, L"BUTTON", L"选择颜色...", BS_PUSHBUTTON | WS_TABSTOP, 0, 132, y, 96, 26, IDC_OSD_BTN_TXT_PICK);
-        MakeCtrl(hwnd, L"BUTTON", L"恢复默认配色", BS_PUSHBUTTON | WS_TABSTOP, 0, 240, y, 112, 26, IDC_OSD_BTN_COL_DEF);
-        y += 38;
+        // Background mode dropdown + color swatch + color picker
+        MakeCtrl(hwnd, L"STATIC", L"背景色:", 0, 0, 16, y + 4, 76, 20, 0);
+        HWND cmbBg = MakeCtrl(hwnd, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP, 0, 96, y + 1, 128, 120, IDC_OSD_CMB_BG_MODE);
+        static const wchar_t *const kBgModes[] = { L"跟随主题", L"自定义颜色", L"完全透明" };
+        PopulateCombo(cmbBg, kBgModes, ARRAYSIZE(kBgModes));
+        MakeCtrl(hwnd, L"BUTTON", L"", BS_OWNERDRAW, 0, 232, y + 1, 28, 24, IDC_OSD_SWATCH_BG);
+        MakeCtrl(hwnd, L"BUTTON", L"选择颜色...", BS_PUSHBUTTON | WS_TABSTOP, 0, 268, y, 108, 26, IDC_OSD_BTN_BG_PICK);
+        y += 34;
 
-        MakeCtrl(hwnd, L"STATIC", L"提示：所有修改实时生效并自动保存至当前 Profile。", 0, 0, 16, y, 360, 20, 0);
+        // Font color mode dropdown + color swatch + color picker
+        MakeCtrl(hwnd, L"STATIC", L"字体颜色:", 0, 0, 16, y + 4, 76, 20, 0);
+        HWND cmbTxt = MakeCtrl(hwnd, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP, 0, 96, y + 1, 128, 100, IDC_OSD_CMB_TXT_MODE);
+        static const wchar_t *const kTxtModes[] = { L"跟随主题", L"自定义颜色" };
+        PopulateCombo(cmbTxt, kTxtModes, ARRAYSIZE(kTxtModes));
+        MakeCtrl(hwnd, L"BUTTON", L"", BS_OWNERDRAW, 0, 232, y + 1, 28, 24, IDC_OSD_SWATCH_TXT);
+        MakeCtrl(hwnd, L"BUTTON", L"选择颜色...", BS_PUSHBUTTON | WS_TABSTOP, 0, 268, y, 108, 26, IDC_OSD_BTN_TXT_PICK);
+        y += 36;
+
+        MakeCtrl(hwnd, L"STATIC", L"提示：支持滑块或手输数值 (14–48px)，修改实时生效并自动保存。", 0, 0, 16, y, 366, 20, 0);
         y += 28;
 
         MakeCtrl(hwnd, L"BUTTON", L"全部恢复默认", BS_PUSHBUTTON | WS_TABSTOP, 0, 16, y, 110, 28, IDC_OSD_BTN_RESET);
-        MakeCtrl(hwnd, L"BUTTON", L"保存并关闭", BS_DEFPUSHBUTTON | WS_TABSTOP, 0, 262, y, 108, 28, IDC_OSD_BTN_CLOSE);
+        MakeCtrl(hwnd, L"BUTTON", L"保存并关闭", BS_DEFPUSHBUTTON | WS_TABSTOP, 0, 268, y, 108, 28, IDC_OSD_BTN_CLOSE);
 
         SyncControlsFromConfig(hwnd);
         return 0;
@@ -778,7 +859,6 @@ static LRESULT CALLBACK OsdSettingsWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARA
         if (dis && g_setCfgPtr && (dis->CtlID == IDC_OSD_SWATCH_BG || dis->CtlID == IDC_OSD_SWATCH_TXT)) {
             RECT rc = dis->rcItem;
             if (dis->CtlID == IDC_OSD_SWATCH_BG && g_setCfgPtr->osdBgTransparent) {
-                // Draw crisp checkerboard to represent transparent background
                 FillRect(dis->hDC, &rc, (HBRUSH)GetStockObject(WHITE_BRUSH));
                 HBRUSH gray = CreateSolidBrush(RGB(180, 180, 180));
                 int step = 6;
@@ -793,8 +873,8 @@ static LRESULT CALLBACK OsdSettingsWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARA
                 DeleteObject(gray);
             } else {
                 uint32_t col24 = (dis->CtlID == IDC_OSD_SWATCH_BG)
-                    ? (g_setCfgPtr->osdUseCustomBg ? g_setCfgPtr->osdBgColor : 0x0018181Bu)
-                    : (g_setCfgPtr->osdUseCustomText ? g_setCfgPtr->osdTextColor : 0x00F4F4F5u);
+                    ? (g_setCfgPtr->osdUseCustomBg ? g_setCfgPtr->osdBgColor : (IsSetDark() ? 0x0018181Bu : 0x00F4F4F5u))
+                    : (g_setCfgPtr->osdUseCustomText ? g_setCfgPtr->osdTextColor : (IsSetDark() ? 0x00F4F4F5u : 0x0018181Bu));
                 HBRUSH br = CreateSolidBrush(Rgb24ToColorRef(col24));
                 FillRect(dis->hDC, &rc, br);
                 DeleteObject(br);
@@ -833,19 +913,11 @@ static LRESULT CALLBACK OsdSettingsWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARA
         if (id == IDC_OSD_BTN_RESET && g_setCfgPtr) {
             int savedX = g_setCfgPtr->capsuleX;
             int savedY = g_setCfgPtr->capsuleY;
+            int savedTheme = g_setCfgPtr->themeMode;
             ModernUiConfig_Defaults(g_setCfgPtr);
-            g_setCfgPtr->capsuleX = savedX;
-            g_setCfgPtr->capsuleY = savedY;
-            SyncControlsFromConfig(hwnd);
-            ApplyAndPersistLive();
-            return 0;
-        }
-        if (id == IDC_OSD_BTN_COL_DEF && g_setCfgPtr && code == BN_CLICKED) {
-            g_setCfgPtr->osdBgTransparent = FALSE;
-            g_setCfgPtr->osdUseCustomBg   = FALSE;
-            g_setCfgPtr->osdBgColor       = 0x0018181Bu;
-            g_setCfgPtr->osdUseCustomText = FALSE;
-            g_setCfgPtr->osdTextColor     = 0x00F4F4F5u;
+            g_setCfgPtr->capsuleX  = savedX;
+            g_setCfgPtr->capsuleY  = savedY;
+            g_setCfgPtr->themeMode = savedTheme;
             SyncControlsFromConfig(hwnd);
             ApplyAndPersistLive();
             return 0;
@@ -871,13 +943,9 @@ static LRESULT CALLBACK OsdSettingsWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARA
             }
             return 0;
         }
-        if ((id == IDC_OSD_CHK_CAPSULE || id == IDC_OSD_CHK_CAP_TOP ||
-             id == IDC_OSD_CHK_ENABLE  || id == IDC_OSD_CHK_RTSS ||
-             id == IDC_OSD_CHK_COMPACT || id == IDC_OSD_CHK_BG_TRANS) && code == BN_CLICKED) {
-            ReadConfigAndApplyLive(hwnd, FALSE, FALSE);
-            return 0;
-        }
-        if (id == IDC_OSD_CMB_ANCHOR && code == CBN_SELCHANGE) {
+        if ((id == IDC_OSD_CMB_MODE || id == IDC_OSD_CMB_CAP_TOP || id == IDC_OSD_CMB_COMPACT ||
+             id == IDC_OSD_CMB_ANCHOR || id == IDC_OSD_CMB_WEIGHT ||
+             id == IDC_OSD_CMB_BG_MODE || id == IDC_OSD_CMB_TXT_MODE) && code == CBN_SELCHANGE) {
             ReadConfigAndApplyLive(hwnd, FALSE, FALSE);
             return 0;
         }
@@ -904,8 +972,9 @@ static LRESULT CALLBACK OsdSettingsWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARA
     case WM_CTLCOLORLISTBOX:
     {
         HDC dc = (HDC)wp;
-        SetTextColor(dc, MODERN_RGB_TEXT_DARK);
-        SetBkColor(dc, MODERN_RGB_CARD_DARK);
+        BOOL dark = IsSetDark();
+        SetTextColor(dc, dark ? MODERN_RGB_TEXT_DARK : MODERN_RGB_TEXT_LIGHT);
+        SetBkColor(dc,   dark ? MODERN_RGB_CARD_DARK : MODERN_RGB_CARD_LIGHT);
         return (LRESULT)g_setEditBrush;
     }
     case WM_CTLCOLORDLG:
@@ -913,8 +982,9 @@ static LRESULT CALLBACK OsdSettingsWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARA
     case WM_CTLCOLORBTN:
     {
         HDC dc = (HDC)wp;
-        SetTextColor(dc, MODERN_RGB_TEXT_DARK);
-        SetBkColor(dc, MODERN_RGB_BG_DARK);
+        BOOL dark = IsSetDark();
+        SetTextColor(dc, dark ? MODERN_RGB_TEXT_DARK : MODERN_RGB_TEXT_LIGHT);
+        SetBkColor(dc,   dark ? MODERN_RGB_BG_DARK   : MODERN_RGB_BG_LIGHT);
         return (LRESULT)g_setBgBrush;
     }
     case WM_CLOSE:
@@ -965,7 +1035,7 @@ void WindowOsd_ShowSettingsWindow(HWND owner, ModernUiConfig *cfg,
         }
     }
 
-    int w = 402, h = 424;
+    int w = 412, h = 448;
     int x = CW_USEDEFAULT, y = CW_USEDEFAULT;
     if (owner && IsWindow(owner)) {
         RECT r;

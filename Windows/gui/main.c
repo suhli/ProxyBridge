@@ -34,6 +34,7 @@
 #include "modern/window_osd.h"
 #include "modern/overlay_dispatcher.h"
 #include "modern/floating_capsule.h"
+#include "modern/main_window_modern.h"
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "user32.lib")
@@ -137,6 +138,9 @@ static BOOL      g_started = FALSE;
 
 static PBProfile g_profile;
 static ModernUiConfig g_modernCfg;
+static BOOL      g_uiIsDark = TRUE;
+static HBRUSH    g_brModernBg = NULL;
+static int       g_curLogSubTab = 0;
 static wchar_t   g_activeProfile[PB_NAME_MAX] = L"Default";
 static BOOL      g_trafficLog = TRUE, g_closeToTray = TRUE;
 static BOOL      g_proxyEnabled = TRUE;   // main switch; not saved: ProxyBridge always starts enabled
@@ -181,6 +185,8 @@ static const wchar_t* ProtoName(int i)  { return i == 1 ? L"UDP" : i == 2 ? L"BO
 static void SaveActive(void);
 static void SyncModernFromProfile(void);
 static void SyncModernToProfile(void);
+static void ApplyModernThemeAll(HWND hwnd);
+static void SyncMainTabVisibility(void);
 static UINT32 ResolveNativeCfg(UINT32 storedId);
 static void ApplyConfigs(void);
 static void ApplyRules(void);
@@ -194,6 +200,10 @@ static void ApplyZoom(HWND hwnd);
 static void RelocalizeUI(HWND hwnd);
 static UINT32 EngineAddRule(PBRule* r);
 static void EngineEditRule(PBRule* r);
+static void SyncModernFromProfile(void);
+static void SyncModernToProfile(void);
+static void ApplyModernThemeAll(HWND hwnd);
+static void SyncMainTabVisibility(void);
 INT_PTR CALLBACK ServersDlgProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK ServerEditDlgProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK RulesDlgProc(HWND, UINT, WPARAM, LPARAM);
@@ -342,6 +352,9 @@ static void SwitchToProfile(const wchar_t* name)
     SyncModernFromProfile();
     OverlayDispatcher_SetConfig(&g_modernCfg);
     FloatingCapsule_ApplyConfig(&g_modernCfg);
+    ModernMain_SetState(&g_modernCfg, g_proxyEnabled, g_activeProfile, PB_VER_STRW, g_lang == 1);
+    ModernMain_RefreshRules(&g_profile);
+    ApplyModernThemeAll(g_hMain);
     ApplyFilterSnapshot();
     g_api.SetTrafficLoggingEnabled(g_trafficLog);
     g_api.SetLogEveryConnection(g_logEvery);
@@ -389,6 +402,7 @@ static void SyncModernFromProfile(void)
     g_modernCfg.osdOffsetY     = g_profile.osdOffsetY;
     g_modernCfg.osdOpacity       = g_profile.osdOpacity;
     g_modernCfg.osdSizePx        = g_profile.osdSizePx;
+    g_modernCfg.osdFontWeight    = g_profile.osdFontWeight;
     g_modernCfg.osdBgTransparent = g_profile.osdBgTransparent != 0;
     g_modernCfg.osdUseCustomBg   = g_profile.osdUseCustomBg != 0;
     g_modernCfg.osdBgColor       = g_profile.osdBgColor;
@@ -412,13 +426,47 @@ static void SyncModernToProfile(void)
     g_profile.osdAnchor      = g_modernCfg.osdAnchor;
     g_profile.osdOffsetX     = g_modernCfg.osdOffsetX;
     g_profile.osdOffsetY     = g_modernCfg.osdOffsetY;
-    g_profile.osdOpacity     = g_modernCfg.osdOpacity;
-    g_profile.osdSizePx      = g_modernCfg.osdSizePx;
+    g_profile.osdOpacity       = g_modernCfg.osdOpacity;
+    g_profile.osdSizePx        = g_modernCfg.osdSizePx;
+    g_profile.osdFontWeight    = g_modernCfg.osdFontWeight;
     g_profile.osdBgTransparent = g_modernCfg.osdBgTransparent ? 1 : 0;
     g_profile.osdUseCustomBg   = g_modernCfg.osdUseCustomBg ? 1 : 0;
     g_profile.osdBgColor       = g_modernCfg.osdBgColor & 0x00FFFFFFu;
     g_profile.osdUseCustomText = g_modernCfg.osdUseCustomText ? 1 : 0;
     g_profile.osdTextColor     = g_modernCfg.osdTextColor & 0x00FFFFFFu;
+}
+
+static void MainRuleResolver(const wchar_t* appName, wchar_t* ruleOut, size_t ruleCch, void* user)
+{
+    (void)user;
+    ModernMain_ResolveRuleForApp(&g_profile, appName, ruleOut, ruleCch);
+}
+
+static void ApplyModernThemeAll(HWND hwnd)
+{
+    if (!hwnd || !IsWindow(hwnd)) return;
+    g_uiIsDark = D2d_ResolveDarkMode(g_modernCfg.themeMode);
+    if (g_brModernBg) DeleteObject(g_brModernBg);
+    g_brModernBg = CreateSolidBrush(g_uiIsDark ? MODERN_RGB_BG_DARK : MODERN_RGB_BG_LIGHT);
+
+    ModernMain_ApplyTheme(hwnd, g_uiIsDark);
+    const wchar_t* expTheme = g_uiIsDark ? L"DarkMode_Explorer" : L"Explorer";
+    if (g_hConnLog) SetWindowTheme(g_hConnLog, expTheme, NULL);
+    if (g_hActLog)  SetWindowTheme(g_hActLog,  expTheme, NULL);
+    if (g_hTab)     SetWindowTheme(g_hTab,     expTheme, NULL);
+    if (g_hFlows)
+    {
+        COLORREF bg  = g_uiIsDark ? MODERN_RGB_CARD_DARK : MODERN_RGB_CARD_LIGHT;
+        COLORREF txt = g_uiIsDark ? MODERN_RGB_TEXT_DARK : MODERN_RGB_TEXT_LIGHT;
+        ListView_SetBkColor(g_hFlows, bg);
+        ListView_SetTextBkColor(g_hFlows, bg);
+        ListView_SetTextColor(g_hFlows, txt);
+        SetWindowTheme(g_hFlows, expTheme, NULL);
+        InvalidateRect(g_hFlows, NULL, TRUE);
+    }
+    FloatingCapsule_ApplyConfig(&g_modernCfg);
+    OverlayDispatcher_SetConfig(&g_modernCfg);
+    InvalidateRect(hwnd, NULL, TRUE);
 }
 
 static void OnModernOsdCfgChanged(const ModernUiConfig* cfg, void* user)
@@ -430,6 +478,111 @@ static void OnModernOsdCfgChanged(const ModernUiConfig* cfg, void* user)
     SaveActive();
     OverlayDispatcher_SetConfig(&g_modernCfg);
     FloatingCapsule_ApplyConfig(&g_modernCfg);
+    ModernMain_SetState(&g_modernCfg, g_proxyEnabled, g_activeProfile, PB_VER_STRW, g_lang == 1);
+}
+
+static void OnModernMainAction(ModernMainAction action, int param, void* user)
+{
+    (void)user;
+    switch (action)
+    {
+    case MODERN_ACT_TOGGLE_PROXY:
+        SendMessageW(g_hMain, WM_COMMAND, IDM_PROXY_ENABLE, 0);
+        break;
+    case MODERN_ACT_TOGGLE_CAPSULE:
+        g_modernCfg.capsuleEnabled = !g_modernCfg.capsuleEnabled;
+        SyncModernToProfile(); SaveActive();
+        FloatingCapsule_ApplyConfig(&g_modernCfg);
+        ModernMain_SetState(&g_modernCfg, g_proxyEnabled, g_activeProfile, PB_VER_STRW, g_lang == 1);
+        SyncMenuChecks(g_hMain);
+        break;
+    case MODERN_ACT_TOGGLE_OSD:
+        g_modernCfg.osdEnabled = !g_modernCfg.osdEnabled;
+        SyncModernToProfile(); SaveActive();
+        OverlayDispatcher_SetConfig(&g_modernCfg);
+        FloatingCapsule_ApplyConfig(&g_modernCfg);
+        ModernMain_SetState(&g_modernCfg, g_proxyEnabled, g_activeProfile, PB_VER_STRW, g_lang == 1);
+        break;
+    case MODERN_ACT_CYCLE_THEME:
+        g_modernCfg.themeMode = (g_modernCfg.themeMode + 1) % 3;
+        SyncModernToProfile(); SaveActive();
+        ModernMain_SetState(&g_modernCfg, g_proxyEnabled, g_activeProfile, PB_VER_STRW, g_lang == 1);
+        ApplyModernThemeAll(g_hMain);
+        break;
+    case MODERN_ACT_OPEN_TELEMETRY:
+        WindowOsd_ShowSettingsWindow(g_hMain, &g_modernCfg, OnModernOsdCfgChanged, NULL);
+        break;
+    case MODERN_ACT_OPEN_SERVERS:
+        DialogBoxW(g_hInst, MAKEINTRESOURCEW(IDD_SERVERS), g_hMain, ServersDlgProc);
+        ModernMain_RefreshRules(&g_profile);
+        break;
+    case MODERN_ACT_TAB_CHANGED:
+        SyncMainTabVisibility();
+        if (param == MODERN_MAIN_TAB_RULES) ModernMain_RefreshRules(&g_profile);
+        break;
+    case MODERN_ACT_RULE_ADD:
+    {
+        if (g_profile.ruleCount >= PB_MAX_RULE) { MessageBoxW(g_hMain, L"Rule limit reached.", APP_TITLE, MB_OK); break; }
+        PBRule r; ZeroMemory(&r, sizeof(r));
+        lstrcpynW(r.name, L"ProxyBridge Rule", 128);
+        lstrcpynW(r.proc, L"*", PB_APPS_MAX); lstrcpynW(r.hosts, L"*", PB_HOSTS_MAX);
+        lstrcpynW(r.ports, L"*", 128); lstrcpynW(r.proto, L"BOTH", 8); lstrcpynW(r.action, L"PROXY", 16);
+        r.enabled = 1;
+        if (DialogBoxParamW(g_hInst, MAKEINTRESOURCEW(IDD_RULE), g_hMain, RuleEditDlgProc, (LPARAM)&r) == 1)
+        {
+            UINT32 id = EngineAddRule(&r);
+            if (id) { r.nativeId = id; g_profile.rule[g_profile.ruleCount++] = r; SaveActive(); ModernMain_RefreshRules(&g_profile); }
+            else MessageBoxW(g_hMain, T(S_ERR_ADDRULE), APP_TITLE, MB_OK | MB_ICONERROR);
+        }
+        break;
+    }
+    case MODERN_ACT_RULE_EDIT:
+    {
+        if (param < 0 || param >= g_profile.ruleCount) break;
+        PBRule r = g_profile.rule[param];
+        if (DialogBoxParamW(g_hInst, MAKEINTRESOURCEW(IDD_RULE), g_hMain, RuleEditDlgProc, (LPARAM)&r) == 1)
+        {
+            g_profile.rule[param] = r;
+            EngineEditRule(&r);
+            SaveActive();
+            ModernMain_RefreshRules(&g_profile);
+        }
+        break;
+    }
+    case MODERN_ACT_RULE_TOGGLE:
+    {
+        if (param < 0 || param >= g_profile.ruleCount) break;
+        PBRule* r = &g_profile.rule[param];
+        r->enabled = !r->enabled;
+        if (r->nativeId) { if (r->enabled) g_api.EnableRule(r->nativeId); else g_api.DisableRule(r->nativeId); }
+        SaveActive();
+        ModernMain_RefreshRules(&g_profile);
+        break;
+    }
+    case MODERN_ACT_RULE_UP:
+    case MODERN_ACT_RULE_DOWN:
+    {
+        int dst = (action == MODERN_ACT_RULE_UP) ? (param - 1) : (param + 1);
+        if (param < 0 || param >= g_profile.ruleCount || dst < 0 || dst >= g_profile.ruleCount) break;
+        PBRule tmp = g_profile.rule[param];
+        g_profile.rule[param] = g_profile.rule[dst];
+        g_profile.rule[dst]   = tmp;
+        if (g_profile.rule[dst].nativeId) g_api.MoveRuleToPosition(g_profile.rule[dst].nativeId, (UINT32)(dst + 1));
+        SaveActive();
+        ModernMain_RefreshRules(&g_profile);
+        break;
+    }
+    case MODERN_ACT_RULE_DELETE:
+    {
+        if (param < 0 || param >= g_profile.ruleCount) break;
+        if (g_profile.rule[param].nativeId) g_api.DeleteRule(g_profile.rule[param].nativeId);
+        for (int i = param; i < g_profile.ruleCount - 1; i++) g_profile.rule[i] = g_profile.rule[i + 1];
+        g_profile.ruleCount--;
+        SaveActive();
+        ModernMain_RefreshRules(&g_profile);
+        break;
+    }
+    }
 }
 
 static void OnCapsulePosChanged(int x, int y, void* user)
@@ -570,6 +723,8 @@ static void RelocalizeUI(HWND hwnd)
     SendMessageW(g_hConnSearch, EM_SETCUEBANNER, TRUE, (LPARAM)T(S_SEARCH_CUE));
     SendMessageW(g_hActSearch,  EM_SETCUEBANNER, TRUE, (LPARAM)T(S_SEARCH_CUE));
     InvalidateRect(g_hTab, NULL, TRUE);
+    ModernMain_SetState(&g_modernCfg, g_proxyEnabled, g_activeProfile, PB_VER_STRW, g_lang == 1);
+    ModernMain_RefreshRules(&g_profile);
     UpdateTitle();
     DrawMenuBar(hwnd);
 }
@@ -680,32 +835,54 @@ static LRESULT CALLBACK ZoomSubclass(HWND h, UINT m, WPARAM w, LPARAM l, UINT_PT
 static void LayoutMain(HWND hwnd)
 {
     RECT rc; GetClientRect(hwnd, &rc);
-    int tabTop = Sc(6), tabH = Sc(32);       // small gap below the menu bar
-    MoveWindow(g_hTab, 0, tabTop, rc.right, tabH, TRUE);
-    int top = tabTop + tabH + Sc(6);
+    int tab2Top = 0;
+    ModernMain_Layout(hwnd, rc.right, rc.bottom, &tab2Top);
+
+    int padX = Sc(14);
+    int tabH = Sc(30);
+    int tabW = rc.right - padX * 2 - Sc(224);
+    if (tabW < Sc(180)) tabW = rc.right - padX * 2;
+    if (tabW < 40) tabW = 40;
+    MoveWindow(g_hTab, padX, tab2Top, tabW, tabH, TRUE);
+
+    int top = tab2Top + tabH + Sc(6);
     int barH = Sc(30), clearW = Sc(130), gap = Sc(6);
-    int searchW = rc.right - 4 - clearW - gap - 4;
+    int searchW = rc.right - padX * 2 - clearW - gap;
+    if (searchW < 40) searchW = 40;
     int logTop = top + barH + 4;
-    int logH = rc.bottom - logTop - 4; if (logH < 0) logH = 0;
+    int logH = rc.bottom - logTop - Sc(12); if (logH < 0) logH = 0;
+    int logW = rc.right - padX * 2; if (logW < 0) logW = 0;
     // search box + Clear button row, then the log below (both tabs share the same rect)
-    MoveWindow(g_hConnSearch, 4, top, searchW, barH - 6, TRUE);
-    MoveWindow(g_hActSearch,  4, top, searchW, barH - 6, TRUE);
-    MoveWindow(g_hConnClear,  4 + searchW + gap, top - 1, clearW, barH - 2, TRUE);
-    MoveWindow(g_hActClear,   4 + searchW + gap, top - 1, clearW, barH - 2, TRUE);
-    MoveWindow(g_hConnLog, 2, logTop, rc.right - 4, logH, TRUE);
-    MoveWindow(g_hActLog,  2, logTop, rc.right - 4, logH, TRUE);
-    MoveWindow(g_hFlowsClear, 4, top - 1, clearW, barH - 2, TRUE);
-    MoveWindow(g_hFlows, 2, logTop, rc.right - 4, logH, TRUE);
+    MoveWindow(g_hConnSearch, padX, top, searchW, barH - 6, TRUE);
+    MoveWindow(g_hActSearch,  padX, top, searchW, barH - 6, TRUE);
+    MoveWindow(g_hConnClear,  padX + searchW + gap, top - 1, clearW, barH - 2, TRUE);
+    MoveWindow(g_hActClear,   padX + searchW + gap, top - 1, clearW, barH - 2, TRUE);
+    MoveWindow(g_hConnLog,    padX, logTop, logW, logH, TRUE);
+    MoveWindow(g_hActLog,     padX, logTop, logW, logH, TRUE);
+    MoveWindow(g_hFlowsClear, padX, top - 1, clearW, barH - 2, TRUE);
+    MoveWindow(g_hFlows,      padX, logTop, logW, logH, TRUE);
+}
+static void SyncMainTabVisibility(void)
+{
+    BOOL onLogs = (ModernMain_GetTab() == MODERN_MAIN_TAB_LOGS);
+    ShowWindow(g_hTab, onLogs ? SW_SHOW : SW_HIDE);
+    int c = (onLogs && g_curLogSubTab == 0) ? SW_SHOW : SW_HIDE;
+    int a = (onLogs && g_curLogSubTab == 1) ? SW_SHOW : SW_HIDE;
+    int f = (onLogs && g_curLogSubTab == 2) ? SW_SHOW : SW_HIDE;
+    ShowWindow(g_hFlows, f); ShowWindow(g_hFlowsClear, f);
+    FlowsActivate(g_hMain, onLogs && g_curLogSubTab == 2);
+    ShowWindow(g_hConnLog, c); ShowWindow(g_hConnSearch, c); ShowWindow(g_hConnClear, c);
+    ShowWindow(g_hActLog,  a); ShowWindow(g_hActSearch,  a); ShowWindow(g_hActClear,  a);
 }
 static void SelectTab(int idx)
 {
-    int c = (idx == 0) ? SW_SHOW : SW_HIDE;
-    int a = (idx == 1) ? SW_SHOW : SW_HIDE;
-    int f = (idx == 2) ? SW_SHOW : SW_HIDE;
-    ShowWindow(g_hFlows, f); ShowWindow(g_hFlowsClear, f);
-    FlowsActivate(g_hMain, idx == 2);
-    ShowWindow(g_hConnLog, c); ShowWindow(g_hConnSearch, c); ShowWindow(g_hConnClear, c);
-    ShowWindow(g_hActLog,  a); ShowWindow(g_hActSearch,  a); ShowWindow(g_hActClear,  a);
+    if (idx < 0) idx = 0;
+    if (idx > 2) idx = 2;
+    g_curLogSubTab = idx;
+    if (g_hTab) TabCtrl_SetCurSel(g_hTab, idx);
+    if (ModernMain_GetTab() != MODERN_MAIN_TAB_LOGS)
+        ModernMain_SetTab(MODERN_MAIN_TAB_LOGS);
+    SyncMainTabVisibility();
 }
 static void SyncMenuChecks(HWND hwnd)
 {
@@ -845,8 +1022,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         LogStoreInit(&g_actStore,  g_hActLog);
         SetTimer(hwnd, TIMER_LOG, 200, NULL);   // batch log updates ~5x/sec
         StatsManager_Init();
+        StatsManager_SetRuleResolver(MainRuleResolver, NULL);
         SyncModernFromProfile();
         D2d_Init();
+        ModernMain_Init(hwnd, g_hInst, g_dpi, &g_modernCfg, OnModernMainAction, NULL);
+        ModernMain_SetState(&g_modernCfg, g_proxyEnabled, g_activeProfile, PB_VER_STRW, g_lang == 1);
+        ModernMain_RefreshRules(&g_profile);
         OverlayDispatcher_Init(g_hInst, &g_modernCfg);
         FloatingCapsule_Init(g_hInst, &g_modernCfg, OnCapsuleAction, OnCapsulePosChanged, NULL);
         FloatingCapsule_SetProxyEnabled(g_proxyEnabled);
@@ -859,18 +1040,27 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0))
             g_hMenuFont = CreateFontIndirectW(&ncm.lfMenuFont);
 
-        // Dark theme: elevate to immersive dark mode, dark scrollbars on the log edits,
-        // and hover tracking for the owner-drawn tabs.
+        // Dark/Light adaptive theme + hover tracking for owner-drawn log sub-tabs.
         InitDarkMode(hwnd);
-        SetWindowTheme(g_hConnLog, L"DarkMode_Explorer", NULL);
-        SetWindowTheme(g_hActLog,  L"DarkMode_Explorer", NULL);
-        SetWindowTheme(g_hTab,     L"DarkMode_Explorer", NULL);
+        ApplyModernThemeAll(hwnd);
         SetWindowSubclass(g_hTab, TabSubProc, 1, 0);
 
-        LayoutMain(hwnd); SelectTab(0);
+        ModernMain_SetTab(MODERN_MAIN_TAB_APPS);
+        LayoutMain(hwnd);
+        SyncMainTabVisibility();
         return 0;
     }
     case WM_SIZE:  LayoutMain(hwnd); DrawMenuBar2(hwnd); return 0;
+    case WM_SETTINGCHANGE:
+        if (g_modernCfg.themeMode == MODERN_THEME_SYSTEM)
+            ApplyModernThemeAll(hwnd);
+        return 0;
+    case WM_ERASEBKGND:
+    {
+        RECT rc; GetClientRect(hwnd, &rc);
+        FillRect((HDC)wp, &rc, g_brModernBg ? g_brModernBg : g_brBg);
+        return 1;
+    }
     case WM_MOUSEWHEEL:
         if (GET_KEYSTATE_WPARAM(wp) & MK_CONTROL)
         {
@@ -885,9 +1075,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_CTLCOLORSTATIC:
     {
         HDC dc = (HDC)wp;
-        SetTextColor(dc, C_TEXT);
-        SetBkColor(dc, C_BG);
-        return (LRESULT)g_brBg;
+        COLORREF textClr = g_uiIsDark ? MODERN_RGB_TEXT_DARK : MODERN_RGB_TEXT_LIGHT;
+        COLORREF bgClr   = g_uiIsDark ? MODERN_RGB_BG_DARK   : MODERN_RGB_BG_LIGHT;
+        SetTextColor(dc, textClr);
+        SetBkColor(dc, bgClr);
+        return (LRESULT)(g_brModernBg ? g_brModernBg : g_brBg);
     }
     case WM_MEASUREITEM:
     {
@@ -1005,6 +1197,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     }
     case WM_NOTIFY:
     {
+        LRESULT mr = 0;
+        if (ModernMain_HandleNotify(lp, &mr)) return mr;
         LPNMHDR nh = (LPNMHDR)lp;
         if (nh->hwndFrom == g_hFlows) return FlowsNotify(lp);
         if (nh->hwndFrom == g_hTab && nh->code == TCN_SELCHANGE) SelectTab(TabCtrl_GetCurSel(g_hTab));
@@ -1057,6 +1251,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 
     case WM_COMMAND:
     {
+        LRESULT mr = 0;
+        if (ModernMain_HandleCommand(wp, lp, &mr)) return mr;
         WORD id = LOWORD(wp);
         if (id >= IDM_PROFILE_SWITCH_BASE && id < IDM_PROFILE_SWITCH_BASE + g_profCount)
         {
@@ -1067,12 +1263,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         switch (id)
         {
         case IDC_FLOWS_CLEAR:    FlowsClearClosed(); return 0;
-        case IDM_PROXY_SETTINGS: DialogBoxW(g_hInst, MAKEINTRESOURCEW(IDD_SERVERS), hwnd, ServersDlgProc); return 0;
-        case IDM_PROXY_RULES:    DialogBoxW(g_hInst, MAKEINTRESOURCEW(IDD_RULES),   hwnd, RulesDlgProc);   return 0;
+        case IDM_PROXY_SETTINGS: DialogBoxW(g_hInst, MAKEINTRESOURCEW(IDD_SERVERS), hwnd, ServersDlgProc); ModernMain_RefreshRules(&g_profile); return 0;
+        case IDM_PROXY_RULES:    DialogBoxW(g_hInst, MAKEINTRESOURCEW(IDD_RULES),   hwnd, RulesDlgProc);   ModernMain_RefreshRules(&g_profile); return 0;
         case IDM_PROXY_ENABLE:
             g_proxyEnabled = !g_proxyEnabled;
             g_api.SetEnabled(g_proxyEnabled);
             FloatingCapsule_SetProxyEnabled(g_proxyEnabled);
+            ModernMain_SetState(&g_modernCfg, g_proxyEnabled, g_activeProfile, PB_VER_STRW, g_lang == 1);
             UpdateTitle(); TrayUpdateTip(); SyncMenuChecks(hwnd);
             return 0;
         case IDM_SET_TRAFFICLOG:
@@ -1095,6 +1292,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             g_modernCfg.capsuleEnabled = !g_modernCfg.capsuleEnabled;
             SyncModernToProfile(); SaveActive();
             FloatingCapsule_ApplyConfig(&g_modernCfg);
+            ModernMain_SetState(&g_modernCfg, g_proxyEnabled, g_activeProfile, PB_VER_STRW, g_lang == 1);
             SyncMenuChecks(hwnd);
             return 0;
         case IDM_SET_OSD_SETTINGS:
@@ -1119,7 +1317,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 if (_wcsicmp(g_nameResult, g_activeProfile) != 0)
                 {
                     if (PB_ProfileRename(g_activeProfile, g_nameResult))
-                    { lstrcpynW(g_activeProfile, g_nameResult, PB_NAME_MAX); RebuildProfileMenu(hwnd); UpdateTitle(); }
+                    { lstrcpynW(g_activeProfile, g_nameResult, PB_NAME_MAX); RebuildProfileMenu(hwnd); ModernMain_SetState(&g_modernCfg, g_proxyEnabled, g_activeProfile, PB_VER_STRW, g_lang == 1); UpdateTitle(); }
                     else MessageBoxW(hwnd, T(S_ERR_IMPORT), APP_TITLE, MB_OK | MB_ICONERROR);
                 }
             }
@@ -1201,8 +1399,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         KillTimer(hwnd, TIMER_STATS);
         FloatingCapsule_Shutdown();
         OverlayDispatcher_Shutdown();
+        ModernMain_Shutdown();
         StatsManager_Shutdown();
         D2d_Shutdown();
+        if (g_brModernBg) { DeleteObject(g_brModernBg); g_brModernBg = NULL; }
         KillTimer(hwnd, TIMER_LOG);
         LogStoreFree(&g_connStore);    // release buffered + pending log lines + the lock
         LogStoreFree(&g_actStore);
@@ -1397,7 +1597,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, PWSTR cmd, int show)
     g_api.SetConnectionCallback(PBConnCb);
     ApplyConfigs();
     g_started = g_api.Start();
-    if (g_started) { ApplyRules(); LogStoreAdd(&g_actStore, T(S_STARTED)); }
+    if (g_started) { ApplyRules(); ModernMain_RefreshRules(&g_profile); ModernMain_SetState(&g_modernCfg, g_proxyEnabled, g_activeProfile, PB_VER_STRW, g_lang == 1); LogStoreAdd(&g_actStore, T(S_STARTED)); }
     else LogStoreAdd(&g_actStore, T(S_STARTFAIL));
 
     if (startMinimized) ShowWindow(g_hMain, SW_HIDE);   // launched by the logon task

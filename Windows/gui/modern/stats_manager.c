@@ -10,11 +10,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Stage 1 diagnostic logging via OutputDebugStringW (cleaned up in Stage 4).
-#ifndef STATS_MANAGER_DEBUG_LOG
-#define STATS_MANAGER_DEBUG_LOG 1
-#endif
-
 #define PROC_SNAP_MAX       2048
 #define VISIBLE_WIN_MAX     512
 #define RAW_PREV_MAX        256
@@ -416,92 +411,6 @@ static int AppTrafficCmp(const void *a, const void *b)
     return 0;
 }
 
-#if STATS_MANAGER_DEBUG_LOG
-static FILE *g_debugLogFile = NULL;
-
-static void OpenDebugLogFile(void)
-{
-    if (g_debugLogFile != NULL) return;
-    wchar_t path[MAX_PATH];
-    DWORD n = GetModuleFileNameW(NULL, path, ARRAYSIZE(path));
-    if (n > 0 && n < ARRAYSIZE(path)) {
-        wchar_t *slash = wcsrchr(path, L'\\');
-        if (slash) *(slash + 1) = L'\0';
-        wcsncat_s(path, ARRAYSIZE(path), L"stats_debug.log", _TRUNCATE);
-        _wfopen_s(&g_debugLogFile, path, L"ab");
-    }
-    if (g_debugLogFile == NULL) {
-        wchar_t tmp[MAX_PATH];
-        DWORD tn = GetTempPathW(ARRAYSIZE(tmp), tmp);
-        if (tn > 0 && tn < ARRAYSIZE(tmp)) {
-            wcsncat_s(tmp, ARRAYSIZE(tmp), L"ProxyBridge_stats_debug.log", _TRUNCATE);
-            _wfopen_s(&g_debugLogFile, tmp, L"ab");
-        }
-    }
-}
-
-static void CloseDebugLogFile(void)
-{
-    if (g_debugLogFile != NULL) {
-        fclose(g_debugLogFile);
-        g_debugLogFile = NULL;
-    }
-}
-
-static void WriteDebugLine(const wchar_t *line)
-{
-    if (!line || !line[0]) return;
-    OutputDebugStringW(line);
-    if (g_debugLogFile == NULL) OpenDebugLogFile();
-    if (g_debugLogFile != NULL) {
-        SYSTEMTIME st;
-        GetLocalTime(&st);
-        char utf8[1024];
-        int bytes = WideCharToMultiByte(CP_UTF8, 0, line, -1, utf8, (int)sizeof(utf8), NULL, NULL);
-        if (bytes > 1) {
-            fprintf(g_debugLogFile, "[%02u:%02u:%02u.%03u] %s",
-                    st.wHour, st.wMinute, st.wSecond, st.wMilliseconds, utf8);
-            fflush(g_debugLogFile);
-        }
-    }
-}
-
-static void EmitDebugTelemetry(const ModernStatsView *v)
-{
-    if (!v) return;
-    // Emit whenever there is any tracked app or active traffic to keep the log clean when idle.
-    if (v->appCount == 0 && v->globalRxBps == 0 && v->globalTxBps == 0) return;
-
-    wchar_t dn[32], up[32], tot[32];
-    ModernFormatSpeedW(v->globalRxBps, FALSE, dn, ARRAYSIZE(dn));
-    ModernFormatSpeedW(v->globalTxBps, FALSE, up, ARRAYSIZE(up));
-    ModernFormatBytesW(v->globalRxTotal + v->globalTxTotal, tot, ARRAYSIZE(tot));
-
-    wchar_t line[512];
-    _snwprintf_s(line, ARRAYSIZE(line), _TRUNCATE,
-        L"[ProxyBridge][Stats] Global: DN=%s UP=%s Total=%s Conns=%u RTT=%ums | FG=%s(PID=%lu, matched=%d)\n",
-        dn, up, tot, v->totalActiveConns, v->globalRttMs,
-        v->foregroundAppName[0] ? v->foregroundAppName : L"(none)",
-        (unsigned long)v->foregroundPid,
-        v->foregroundMatched ? 1 : 0);
-    WriteDebugLine(line);
-
-    uint32_t limit = v->appCount < 5 ? v->appCount : 5;
-    for (uint32_t i = 0; i < limit; i++) {
-        const ModernAppTraffic *a = &v->apps[i];
-        ModernFormatSpeedW(a->rxBytesPerSec, FALSE, dn, ARRAYSIZE(dn));
-        ModernFormatSpeedW(a->txBytesPerSec, FALSE, up, ARRAYSIZE(up));
-        ModernFormatBytesW(a->rxBytesTotal + a->txBytesTotal, tot, ARRAYSIZE(tot));
-        _snwprintf_s(line, ARRAYSIZE(line), _TRUNCATE,
-            L"[ProxyBridge][Stats]   App[%u]: %s (HostPID=%lu, treePids=%u%s) DN=%s UP=%s Total=%s Conns=%u RTT=%ums\n",
-            i, a->appName, (unsigned long)a->hostPid, a->treePidCount,
-            a->isForeground ? L", FG" : L"",
-            dn, up, tot, a->activeConns, a->rttMs);
-        WriteDebugLine(line);
-    }
-}
-#endif
-
 // ---- Public lifecycle & subscription API ----
 void StatsManager_Init(void)
 {
@@ -517,18 +426,11 @@ void StatsManager_Init(void)
     g_globalTxTotal  = 0;
     g_lastGlobalRtt  = 0;
     g_initialized    = TRUE;
-#if STATS_MANAGER_DEBUG_LOG
-    WriteDebugLine(L"[ProxyBridge][Stats] === StatsManager initialized (1000ms poll active) ===\n");
-#endif
 }
 
 void StatsManager_Shutdown(void)
 {
     if (!g_initialized) return;
-#if STATS_MANAGER_DEBUG_LOG
-    WriteDebugLine(L"[ProxyBridge][Stats] === StatsManager shutdown ===\n");
-    CloseDebugLogFile();
-#endif
     free(g_procNodes);
     free(g_visibleWinPids);
     g_procNodes      = NULL;
@@ -780,10 +682,6 @@ void StatsManager_Tick(StatsFetchSnapshotFn fetchFn, BOOL proxyEnabled)
     next.txHistory[MODERN_HISTORY_LEN - 1] = globalTxBps;
 
     g_latestView = next;
-
-#if STATS_MANAGER_DEBUG_LOG
-    EmitDebugTelemetry(&g_latestView);
-#endif
 
     // Notify subscribers (Stage 2 OSD/RTSS, Stage 3 Capsule, Stage 4 Main Window)
     for (int i = 0; i < STATS_MAX_LISTENERS; i++) {

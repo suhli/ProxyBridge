@@ -11,7 +11,11 @@ typedef enum {
     D2D_FONT_UI_12 = 0,
     D2D_FONT_UI_13,
     D2D_FONT_UI_14_BOLD,
+    D2D_FONT_MONO_11_LIGHT,
     D2D_FONT_MONO_11,
+    D2D_FONT_MONO_11_MEDIUM,
+    D2D_FONT_MONO_11_SEMIBOLD,
+    D2D_FONT_MONO_11_BOLD,
     D2D_FONT_MONO_12,
     D2D_FONT_MONO_12_BOLD,
     D2D_FONT_MONO_16_BOLD,
@@ -84,6 +88,7 @@ void  D2d_DrawText(D2dCanvas *c, D2dFontSlot font, const wchar_t *text,
                    float x, float y, float w, float h, uint32_t argb,
                    D2dAlign align, BOOL tabularFigures);
 float D2d_MeasureTextWidth(D2dFontSlot font, const wchar_t *text, BOOL tabularFigures);
+D2dFontSlot D2d_Mono11ForWeight(int weight);
 
 #ifdef __cplusplus
 }
