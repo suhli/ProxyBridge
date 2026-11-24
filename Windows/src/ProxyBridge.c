@@ -1,3 +1,4 @@
+#define PID_STATS_IMPL
 #include "pb_internal.h"
 
 // Core: shared globals, WinDivert packet loop, lifecycle (Start/Stop), DllMain.
@@ -1091,6 +1092,8 @@ PROXYBRIDGE_API UINT32 ProxyBridge_GetFlows(PB_FLOW *out, UINT32 max)
     return n;
 }
 
+PROXYBRIDGE_API BOOL ProxyBridge_GetPidStats(PidStatsSnapshot *out) { return pid_stats_snapshot(out); }
+
 PROXYBRIDGE_API void ProxyBridge_SetLogEveryConnection(BOOL enable)
 {
     g_log_every_connection = enable ? TRUE : FALSE;
@@ -1225,6 +1228,7 @@ PROXYBRIDGE_API BOOL ProxyBridge_Start(void)
     InitializeSRWLock(&lock);
     dns_cache_init();
     udp_direct_reset();
+    pid_stats_reset();
 
     // If domain rules were configured before start, flush the OS DNS cache so the very
     // first connections re-resolve on the wire and populate our IP->hostname snoop cache.

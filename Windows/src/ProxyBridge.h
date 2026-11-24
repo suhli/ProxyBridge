@@ -2,6 +2,7 @@
 #define PROXYBRIDGE_H
 
 #include <windows.h>
+#include "pid_stats.h"
 
 #ifdef PROXYBRIDGE_EXPORTS
 #define PROXYBRIDGE_API __declspec(dllexport)
@@ -81,6 +82,7 @@ typedef struct {
 } PB_FLOW;
 // Fills `out` with up to `max` (at most PB_FLOWS_MAX) live flows, newest first. Cheap enough to poll about once a second.
 PROXYBRIDGE_API UINT32 ProxyBridge_GetFlows(PB_FLOW* out, UINT32 max);
+PROXYBRIDGE_API BOOL   ProxyBridge_GetPidStats(PidStatsSnapshot* out);
 PROXYBRIDGE_API void ProxyBridge_SetLogEveryConnection(BOOL enable);   // FALSE (default): Connections log skips repeats; TRUE: every new connection
 PROXYBRIDGE_API void ProxyBridge_SetEnabled(BOOL enable);   // main switch: FALSE pauses all rules for new connections (default TRUE)
 PROXYBRIDGE_API void ProxyBridge_SetLogCallback(LogCallback callback);

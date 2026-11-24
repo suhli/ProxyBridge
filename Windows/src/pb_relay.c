@@ -303,6 +303,7 @@ DWORD WINAPI udp_relay_server(LPVOID arg)
                     {
                         InterlockedExchange64((LONGLONG volatile*)&winner_conn->last_activity, (LONGLONG)GetTickCount64());
                         InterlockedExchangeAdd64(&winner_conn->down_bytes, (LONG64)(recv_len - 10));
+                        pid_stats_add_bytes(winner_conn->pid, 0, (uint64_t)(recv_len - 10));
                     }
                     ReleaseSRWLockShared(&lock);
 
@@ -653,6 +654,7 @@ static DWORD WINAPI connection_handler_impl(LPVOID arg)
     socks_addr.sin_addr.s_addr = proxy_ip;
     socks_addr.sin_port = htons(proxy->port);
 
+    LARGE_INTEGER rtt_t0 = pid_stats_now();
     if (connect(socks_sock, (struct sockaddr *)&socks_addr, sizeof(socks_addr)) == SOCKET_ERROR)
     {
         log_message("[RELAY] Failed to connect to proxy %s:%d (%d)", proxy->host, proxy->port, WSAGetLastError());
@@ -701,6 +703,7 @@ static DWORD WINAPI connection_handler_impl(LPVOID arg)
         }
     }
 
+    pid_stats_record_rtt(meta.pid, rtt_t0);
     // Disable timeout for data transfer phase
     DWORD zero_timeout = 0;
     setsockopt(socks_sock, SOL_SOCKET, SO_RCVTIMEO, (char*)&zero_timeout, sizeof(zero_timeout));
@@ -945,6 +948,7 @@ static void relay_release(RELAY_CONN *rc)
     closesocket(rc->s[1]);
     relay_buf_put(rc->dir[0].buf);
     relay_buf_put(rc->dir[1].buf);
+    pid_stats_conn_close(rc->meta.pid);
     free(rc);
     InterlockedDecrement(&g_active_relays);
 }
@@ -1016,6 +1020,7 @@ static DWORD WINAPI relay_worker(LPVOID arg)
         default:                                       // RS_SEND
             if (n == 0) { relay_dir_end(d); continue; }
             InterlockedExchangeAdd64(&d->bytes, (LONG64)n);
+            pid_stats_add_bytes(d->rc->meta.pid, d == &d->rc->dir[0] ? (uint64_t)n : 0, d == &d->rc->dir[1] ? (uint64_t)n : 0);
             d->off += n;
             if (d->off < d->len) posted = relay_post_send(d);
             else if (d->len < RELAY_BUF_SIZE / 4) posted = relay_post_wait(d);   // lightly used: drop the buffer
@@ -1093,6 +1098,7 @@ BOOL relay_start(SOCKET client, SOCKET proxy, const FLOW_META *meta)
     g_relay_head = rc;
     LeaveCriticalSection(&g_relay_lock);
     InterlockedIncrement(&g_active_relays);
+    pid_stats_conn_open(rc->meta.pid);
 
     // Both directions start idle (no buffers); the first byte or close wakes them.
     if (!relay_post_wait(&rc->dir[0])) relay_dir_end(&rc->dir[0]);

@@ -195,6 +195,20 @@ static BOOL Dispatch(const BYTE *req, DWORD reqLen, PbW *resp)
         }
         return resp->ok;
     }
+    case CMD_GET_PID_STATS: {
+        static PidStatsSnapshot snap;
+        ZeroMemory(&snap, sizeof(snap));
+        if (g_api.GetPidStats) g_api.GetPidStats(&snap);
+        if (snap.count > MAX_TRACKED_PIDS) snap.count = MAX_TRACKED_PIDS;
+        PbW_U32(resp, snap.count);
+        for (UINT32 i = 0; i < snap.count; i++) {
+            const PidTrafficEntry *e = &snap.entries[i];
+            PbW_U32(resp, e->pid); PbW_U32(resp, (UINT32)e->tx_bytes); PbW_U32(resp, (UINT32)(e->tx_bytes >> 32));
+            PbW_U32(resp, (UINT32)e->rx_bytes); PbW_U32(resp, (UINT32)(e->rx_bytes >> 32));
+            PbW_U32(resp, e->rtt_ms); PbW_U32(resp, e->active_conns);
+        }
+        return resp->ok;
+    }
     case PBOP_START: ret = g_api.Start(); break;
     case PBOP_STOP:  ret = g_api.Stop();  break;
     default: return FALSE;

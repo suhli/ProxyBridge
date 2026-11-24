@@ -7,6 +7,7 @@
 #define PB_API_H
 
 #include <windows.h>
+#include "../../src/pid_stats.h"
 
 // enums (must match ProxyBridge.h)
 typedef enum { PB_PROXY_HTTP = 0, PB_PROXY_SOCKS5 = 1 } PBProxyType;
@@ -56,6 +57,7 @@ typedef void   (*PFN_SetEnabled)(BOOL);
 typedef void   (*PFN_SetLogEveryConnection)(BOOL);
 typedef void   (*PFN_ClearConnectionLogs)(void);
 typedef UINT32 (*PFN_GetFlows)(PBFlow*, UINT32);
+typedef BOOL   (*PFN_GetPidStats)(PidStatsSnapshot*);
 typedef BOOL   (*PFN_Start)(void);
 typedef BOOL   (*PFN_Stop)(void);
 
@@ -81,6 +83,7 @@ typedef struct {
     PFN_SetLogEveryConnection     SetLogEveryConnection;
     PFN_ClearConnectionLogs       ClearConnectionLogs;
     PFN_GetFlows                  GetFlows;
+    PFN_GetPidStats               GetPidStats;
     PFN_Start                     Start;
     PFN_Stop                      Stop;
 } PBApi;
@@ -128,6 +131,7 @@ static BOOL PB_LoadDirect(PBApi* api)
     PB_BIND(SetLogEveryConnection,    "SetLogEveryConnection");
     PB_BIND(ClearConnectionLogs,      "ClearConnectionLogs");
     PB_BIND(GetFlows,                 "GetFlows");
+    api->GetPidStats = (PFN_GetPidStats)(void*)GetProcAddress(api->dll, "ProxyBridge_GetPidStats");
     PB_BIND(Start,                    "Start");
     PB_BIND(Stop,                     "Stop");
     #undef PB_BIND

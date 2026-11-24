@@ -29,6 +29,7 @@
 #include "api/pb_ipc.h"
 #include "profile/profile.h"
 #include "loc/loc.h"
+#include "modern/stats_manager.h"
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "user32.lib")
@@ -110,7 +111,8 @@ typedef struct {
     CRITICAL_SECTION lock;
 } LogStore;
 static LogStore g_connStore, g_actStore;
-#define TIMER_LOG 1                // batched log-flush timer
+#define TIMER_LOG   1              // batched log-flush timer
+#define TIMER_STATS 3              // 1000ms PID stats & process-tree aggregation timer
 static int g_idleTicks = 0;        // consecutive idle flushes (for working-set trim)
 static HFONT     g_hMono, g_hUi;
 
@@ -719,6 +721,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         LogStoreInit(&g_connStore, g_hConnLog);
         LogStoreInit(&g_actStore,  g_hActLog);
         SetTimer(hwnd, TIMER_LOG, 200, NULL);   // batch log updates ~5x/sec
+        StatsManager_Init();
+        SetTimer(hwnd, TIMER_STATS, STATS_POLL_INTERVAL_MS, NULL);
 
         // Menu-bar quick-access icons are drawn on the (non-client) menu bar in WM_NCPAINT;
         // this is their glyph font. The menu-bar font is used to owner-draw the top-level
@@ -879,6 +883,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     }
     case WM_TIMER:
+        if (wp == TIMER_STATS) { if (g_started && g_api.GetPidStats) StatsManager_Tick(g_api.GetPidStats, g_proxyEnabled); return 0; }
         if (wp == TIMER_FLOWS) { if (IsWindowVisible(hwnd) && !IsIconic(hwnd)) FlowsPollAsync(); return 0; }   // only while the Live Connections tab is open
         if (wp == TIMER_LOG)
         {
@@ -1053,6 +1058,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_DESTROY:
         if (g_api.Stop) g_api.Stop();
         TrayRemove();
+        KillTimer(hwnd, TIMER_STATS);
+        StatsManager_Shutdown();
         KillTimer(hwnd, TIMER_LOG);
         LogStoreFree(&g_connStore);    // release buffered + pending log lines + the lock
         LogStoreFree(&g_actStore);
@@ -1092,41 +1099,48 @@ static BOOL IsElevated(void)
     return elevated;
 }
 
-static BOOL ConnectEngine(void)
+static BOOL ConnectEngine(BOOL forcePortable)
 {
-    int rc = PB_LoadService(&g_api);
-    if (rc == PB_IPC_OK) return TRUE;
+    if (!forcePortable)
+    {
+        int rc = PB_LoadService(&g_api);
+        if (rc == PB_IPC_OK) return TRUE;
 
-    if (rc == PB_IPC_BUSY)
-    {
-        MessageBoxW(NULL, L"Another ProxyBridge window (possibly in a different user session) is already "
-                          L"connected to the ProxyBridge service.\nClose it and try again.",
-                    APP_TITLE, MB_OK | MB_ICONWARNING);
-        return FALSE;
-    }
-    if (rc == PB_IPC_BAD_VERSION)
-    {
-        MessageBoxW(NULL, L"The installed ProxyBridge service is a different version than this program.\n"
-                          L"Re-run the ProxyBridge installer.", APP_TITLE, MB_OK | MB_ICONERROR);
-        return FALSE;
-    }
-
-    if (rc == PB_IPC_DENIED)
-    {
-        // The service refuses this account. Offer the elevated stand-alone mode as a fallback.
-        if (MessageBoxW(NULL, L"This account is not allowed to use the ProxyBridge service.\n"
-                              L"Ask an administrator to add you to the \"ProxyBridge Users\" group, then sign out and in.\n"
-                              L"Run as administrator instead?",
-                        APP_TITLE, MB_YESNO | MB_ICONWARNING) != IDYES)
+        if (rc == PB_IPC_BUSY)
+        {
+            MessageBoxW(NULL, L"Another ProxyBridge window (possibly in a different user session) is already "
+                              L"connected to the ProxyBridge service.\nClose it and try again.",
+                        APP_TITLE, MB_OK | MB_ICONWARNING);
             return FALSE;
+        }
+        if (rc == PB_IPC_BAD_VERSION)
+        {
+            if (MessageBoxW(NULL, L"The installed ProxyBridge service is a different version than this program.\n"
+                                  L"Run in portable mode (Administrator) using the local ProxyBridgeCore.dll instead?",
+                            APP_TITLE, MB_YESNO | MB_ICONWARNING) != IDYES)
+                return FALSE;
+            forcePortable = TRUE;
+        }
+        else if (rc == PB_IPC_DENIED)
+        {
+            // The service refuses this account. Offer the elevated stand-alone mode as a fallback.
+            if (MessageBoxW(NULL, L"This account is not allowed to use the ProxyBridge service.\n"
+                                  L"Ask an administrator to add you to the \"ProxyBridge Users\" group, then sign out and in.\n"
+                                  L"Run as administrator instead?",
+                            APP_TITLE, MB_YESNO | MB_ICONWARNING) != IDYES)
+                return FALSE;
+            forcePortable = TRUE;
+        }
     }
 
-    // No service: portable mode.
+    // No service or portable mode requested.
     if (!IsElevated())
     {
         wchar_t exe[MAX_PATH]; GetModuleFileNameW(NULL, exe, MAX_PATH);
         SHELLEXECUTEINFOW sei; ZeroMemory(&sei, sizeof(sei));
-        sei.cbSize = sizeof(sei); sei.lpVerb = L"runas"; sei.lpFile = exe; sei.nShow = SW_SHOWNORMAL;
+        sei.cbSize = sizeof(sei); sei.lpVerb = L"runas"; sei.lpFile = exe;
+        if (forcePortable) sei.lpParameters = L"--portable";
+        sei.nShow = SW_SHOWNORMAL;
         ShellExecuteExW(&sei);   // on UAC cancel just exit
         return FALSE;
     }
@@ -1146,6 +1160,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, PWSTR cmd, int show)
     (void)hPrev;
     g_hInst = hInst;
     BOOL startMinimized = (cmd && wcsstr(cmd, L"--minimized") != NULL);
+    BOOL forcePortable  = (cmd && wcsstr(cmd, L"--portable") != NULL);
 
     {
         HDC sdc = GetDC(NULL);
@@ -1170,7 +1185,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, PWSTR cmd, int show)
         return 0;
     }
 
-    if (!ConnectEngine())
+    if (!ConnectEngine(forcePortable))
         return 1;
 
     g_autoClear   = g_profile.autoClearLogs;

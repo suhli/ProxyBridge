@@ -1,0 +1,46 @@
+[10:09:24.779] [ProxyBridge][Stats] === StatsManager initialized (1000ms poll active) ===
+[10:09:46.799] [ProxyBridge][Stats] Global: DN=14.9 KB/s UP=6.2 KB/s Total=21.1 KB Conns=3 RTT=2ms | FG=pebrel.exe(PID=46820, matched=0)
+[10:09:46.800] [ProxyBridge][Stats]   App[0]: Antigravity.exe (HostPID=21856, treePids=1) DN=14.9 KB/s UP=6.2 KB/s Total=21.1 KB Conns=3 RTT=2ms
+[10:09:47.793] [ProxyBridge][Stats] Global: DN=0 B/s UP=0 B/s Total=21.1 KB Conns=3 RTT=2ms | FG=pebrel.exe(PID=46820, matched=0)
+[10:09:47.793] [ProxyBridge][Stats]   App[0]: Antigravity.exe (HostPID=21856, treePids=1) DN=0 B/s UP=0 B/s Total=21.1 KB Conns=3 RTT=2ms
+[10:09:48.795] [ProxyBridge][Stats] Global: DN=0 B/s UP=0 B/s Total=21.1 KB Conns=3 RTT=2ms | FG=pebrel.exe(PID=46820, matched=0)
+[10:09:48.795] [ProxyBridge][Stats]   App[0]: Antigravity.exe (HostPID=21856, treePids=1) DN=0 B/s UP=0 B/s Total=21.1 KB Conns=3 RTT=2ms
+[10:09:49.789] [ProxyBridge][Stats] Global: DN=1.5 KB/s UP=1.5 KB/s Total=24.1 KB Conns=3 RTT=2ms | FG=pebrel.exe(PID=46820, matched=0)
+[10:09:49.789] [ProxyBridge][Stats]   App[0]: Antigravity.exe (HostPID=21856, treePids=1) DN=1.5 KB/s UP=1.5 KB/s Total=24.1 KB Conns=3 RTT=2ms
+[10:09:50.801] [ProxyBridge][Stats] Global: DN=785 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms | FG=pebrel.exe(PID=46820, matched=0)
+[10:09:50.801] [ProxyBridge][Stats]   App[0]: Antigravity.exe (HostPID=21856, treePids=1) DN=785 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms
+[10:09:51.793] [ProxyBridge][Stats] Global: DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms | FG=pebrel.exe(PID=46820, matched=0)
+[10:09:51.793] [ProxyBridge][Stats]   App[0]: Antigravity.exe (HostPID=21856, treePids=1) DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms
+[10:09:52.802] [ProxyBridge][Stats] Global: DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms | FG=Antigravity.exe(PID=21856, matched=1)
+[10:09:52.802] [ProxyBridge][Stats]   App[0]: Antigravity.exe (HostPID=21856, treePids=1, FG) DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms
+[10:09:53.792] [ProxyBridge][Stats] Global: DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms | FG=Antigravity.exe(PID=21856, matched=1)
+[10:09:53.792] [ProxyBridge][Stats]   App[0]: Antigravity.exe (HostPID=21856, treePids=1, FG) DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms
+[10:09:54.805] [ProxyBridge][Stats] Global: DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms | FG=Antigravity.exe(PID=21856, matched=1)
+[10:09:54.805] [ProxyBridge][Stats]   App[0]: Antigravity.exe (HostPID=21856, treePids=1, FG) DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms
+[10:09:55.794] [ProxyBridge][Stats] Global: DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms | FG=Antigravity.exe(PID=21856, matched=1)
+[10:09:55.794] [ProxyBridge][Stats]   App[0]: Antigravity.exe (HostPID=21856, treePids=1, FG) DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms
+[10:09:56.788] [ProxyBridge][Stats] Global: DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms | FG=Antigravity.exe(PID=21856, matched=1)
+[10:09:56.788] [ProxyBridge][Stats]   App[0]: Antigravity.exe (HostPID=21856, treePids=1, FG) DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms
+[10:09:57.797] [ProxyBridge][Stats] Global: DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms | FG=ProxyBridge.exe(PID=29304, matched=0)
+[10:09:57.797] [ProxyBridge][Stats]   App[0]: Antigravity.exe (HostPID=21856, treePids=1) DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms
+[10:09:58.789] [ProxyBridge][Stats] Global: DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms | FG=Antigravity.exe(PID=21856, matched=1)
+[10:09:58.789] [ProxyBridge][Stats]   App[0]: Antigravity.exe (HostPID=21856, treePids=1, FG) DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms
+[10:09:59.805] [ProxyBridge][Stats] Global: DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms | FG=SearchHost.exe(PID=1836, matched=0)
+[10:09:59.805] [ProxyBridge][Stats]   App[0]: Antigravity.exe (HostPID=21856, treePids=1) DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms
+[10:10:00.802] [ProxyBridge][Stats] Global: DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms | FG=SearchHost.exe(PID=1836, matched=0)
+[10:10:00.802] [ProxyBridge][Stats]   App[0]: Antigravity.exe (HostPID=21856, treePids=1) DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms
+[10:10:01.791] [ProxyBridge][Stats] Global: DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms | FG=ProxyBridge.exe(PID=25896, matched=0)
+[10:10:01.791] [ProxyBridge][Stats]   App[0]: Antigravity.exe (HostPID=21856, treePids=1) DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms
+[10:10:02.789] [ProxyBridge][Stats] Global: DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms | FG=ProxyBridge.exe(PID=25896, matched=0)
+[10:10:02.789] [ProxyBridge][Stats]   App[0]: Antigravity.exe (HostPID=21856, treePids=1) DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms
+[10:10:03.791] [ProxyBridge][Stats] Global: DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms | FG=explorer.exe(PID=9740, matched=0)
+[10:10:03.793] [ProxyBridge][Stats]   App[0]: Antigravity.exe (HostPID=21856, treePids=1) DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms
+[10:10:04.797] [ProxyBridge][Stats] Global: DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms | FG=explorer.exe(PID=9740, matched=0)
+[10:10:04.797] [ProxyBridge][Stats]   App[0]: Antigravity.exe (HostPID=21856, treePids=1) DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms
+[10:10:05.791] [ProxyBridge][Stats] Global: DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms | FG=explorer.exe(PID=9740, matched=0)
+[10:10:05.791] [ProxyBridge][Stats]   App[0]: Antigravity.exe (HostPID=21856, treePids=1) DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms
+[10:10:06.791] [ProxyBridge][Stats] Global: DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms | FG=explorer.exe(PID=9740, matched=0)
+[10:10:06.791] [ProxyBridge][Stats]   App[0]: Antigravity.exe (HostPID=21856, treePids=1) DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms
+[10:10:07.788] [ProxyBridge][Stats] Global: DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms | FG=explorer.exe(PID=9740, matched=0)
+[10:10:07.788] [ProxyBridge][Stats]   App[0]: Antigravity.exe (HostPID=21856, treePids=1) DN=0 B/s UP=0 B/s Total=24.8 KB Conns=3 RTT=2ms
+[10:10:09.329] [ProxyBridge][Stats] === StatsManager shutdown ===

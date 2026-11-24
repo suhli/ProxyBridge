@@ -167,6 +167,30 @@ static UINT32 IpcGetFlows(PBFlow *out, UINT32 max)
     }
     return i == n ? n : 0;
 }
+static BOOL IpcGetPidStats(PidStatsSnapshot *out)
+{
+    if (out == NULL) return FALSE;
+    ZeroMemory(out, sizeof(*out));
+    BYTE req[8]; PbW w; PbW_Init(&w, req, sizeof(req)); PbW_U32(&w, CMD_GET_PID_STATS);
+    static BYTE rsp[PB_MSG_MAX];
+    DWORD got = 0;
+    if (!PbIpcExchange(req, w.len, rsp, sizeof(rsp), &got)) return FALSE;
+    PbR r; PbR_Init(&r, rsp, got);
+    UINT32 n = PbR_U32(&r);
+    if (!r.ok || n > MAX_TRACKED_PIDS) return FALSE;
+    for (UINT32 i = 0; i < n; i++)
+    {
+        PidTrafficEntry *e = &out->entries[i];
+        e->pid = PbR_U32(&r);
+        UINT32 lo = PbR_U32(&r), hi = PbR_U32(&r); e->tx_bytes = ((uint64_t)hi << 32) | lo;
+        lo = PbR_U32(&r); hi = PbR_U32(&r);        e->rx_bytes = ((uint64_t)hi << 32) | lo;
+        e->rtt_ms = PbR_U32(&r);
+        e->active_conns = PbR_U32(&r);
+        if (!r.ok) { ZeroMemory(out, sizeof(*out)); return FALSE; }
+    }
+    out->count = n;
+    return TRUE;
+}
 static void IpcSetEnabled(BOOL v)     { PBIPC_BEGIN(PBOP_SET_ENABLED);     PbW_U32(&_w, v != 0); PbIpcCall(_b, _w.len); }
 static void IpcSetLogCallback(PBLogCallback cb)               { g_ipcLogCb = cb; }
 static void IpcSetConnectionCallback(PBConnectionCallback cb) { g_ipcConnCb = cb; }
@@ -287,6 +311,7 @@ static int PB_LoadService(PBApi* api)
     api->SetTrafficLoggingEnabled = IpcSetTrafficLog;   api->SetEnabled = IpcSetEnabled;   api->SetLogEveryConnection = IpcSetLogAll;
     api->ClearConnectionLogs = IpcClearConnLogs;   api->Start = IpcStart; api->Stop = IpcStop;
     api->GetFlows = IpcGetFlows;
+    api->GetPidStats = IpcGetPidStats;
     return PB_IPC_OK;
 }
 

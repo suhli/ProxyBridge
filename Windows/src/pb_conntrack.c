@@ -159,7 +159,7 @@ BOOL get_connection_full_v6_x(UINT16 src_port, BOOL is_udp, UINT8 dest_ip6[16], 
             if (proxy_config_id != NULL) *proxy_config_id = conn->proxy_config_id;
             if (pid != NULL) *pid = conn->pid;
             if (rule_id != NULL) *rule_id = conn->rule_id;
-            if (acct_up) InterlockedExchangeAdd64(&conn->up_bytes, (LONG64)acct_up);
+            if (acct_up) { InterlockedExchangeAdd64(&conn->up_bytes, (LONG64)acct_up); pid_stats_add_bytes(conn->pid, acct_up, 0); }
             InterlockedExchange64((LONGLONG volatile*)&conn->last_activity, (LONGLONG)GetTickCount64());
             found = TRUE;
             break;
@@ -191,7 +191,7 @@ BOOL find_v6_udp_sender(const UINT8 orig_dest_ip6[16], UINT16 orig_dest_port, UI
             }
         }
     }
-    if (winner != NULL && acct_down) InterlockedExchangeAdd64(&winner->down_bytes, (LONG64)acct_down);
+    if (winner != NULL && acct_down) { InterlockedExchangeAdd64(&winner->down_bytes, (LONG64)acct_down); pid_stats_add_bytes(winner->pid, 0, acct_down); }
     ReleaseSRWLockShared(&lock);
     return found;
 }
@@ -343,7 +343,7 @@ BOOL get_connection_full_x(UINT16 src_port, BOOL is_udp, UINT32 *dest_ip, UINT16
             if (proxy_config_id != NULL) *proxy_config_id = conn->proxy_config_id;
             if (pid != NULL) *pid = conn->pid;
             if (rule_id != NULL) *rule_id = conn->rule_id;
-            if (acct_up) InterlockedExchangeAdd64(&conn->up_bytes, (LONG64)acct_up);
+            if (acct_up) { InterlockedExchangeAdd64(&conn->up_bytes, (LONG64)acct_up); pid_stats_add_bytes(conn->pid, acct_up, 0); }
             InterlockedExchange64((LONGLONG volatile*)&conn->last_activity, (LONGLONG)GetTickCount64());
             found = TRUE;
             break;
