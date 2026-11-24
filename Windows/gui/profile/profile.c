@@ -297,7 +297,7 @@ void PB_ProfileDefaults(PBProfile* p, const wchar_t* name)
     p->osdOffsetX        = 0;
     p->osdOffsetY        = 4;
     p->osdOpacity        = 90;
-    p->osdScalePct       = 100;
+    p->osdSizePx         = 22;
 }
 
 // Makes proxy-config ids unique and non-zero and positions the allocator past every id in use.
@@ -363,8 +363,8 @@ void PB_ProfileLoad(const wchar_t* name, PBProfile* p)
         if (p->osdOffsetY < -400 || p->osdOffsetY > 400) p->osdOffsetY = 4;
         p->osdOpacity     = (int)json_long(root, "OsdOpacity", 90);
         if (p->osdOpacity < 0 || p->osdOpacity > 100) p->osdOpacity = 90;
-        p->osdScalePct    = (int)json_long(root, "OsdScalePct", 100);
-        if (p->osdScalePct < 75 || p->osdScalePct > 150) p->osdScalePct = 100;
+        p->osdSizePx      = (int)json_long(root, "OsdSizePx", 22);
+        if (p->osdSizePx < 14 || p->osdSizePx > 48) p->osdSizePx = 22;
 
         JVal* cfgs = json_get(root, "ProxyConfigs");
         if (cfgs && cfgs->type == J_ARR)
@@ -474,7 +474,7 @@ BOOL PB_ProfileSave(const wchar_t* name, const PBProfile* p)
             "  \"OsdOffsetX\": %d,\n"
             "  \"OsdOffsetY\": %d,\n"
             "  \"OsdOpacity\": %d,\n"
-            "  \"OsdScalePct\": %d,\n",
+            "  \"OsdSizePx\": %d,\n",
             p->themeMode,
             p->capsuleEnabled ? "true" : "false",
             p->capsuleTopmost ? "true" : "false",
@@ -484,7 +484,7 @@ BOOL PB_ProfileSave(const wchar_t* name, const PBProfile* p)
             p->osdCompactMode ? "true" : "false",
             p->rtssEnabled    ? "true" : "false",
             p->osdAnchor, p->osdOffsetX, p->osdOffsetY,
-            p->osdOpacity, p->osdScalePct);
+            p->osdOpacity, p->osdSizePx);
         sb_put(&b, mb);
     }
 

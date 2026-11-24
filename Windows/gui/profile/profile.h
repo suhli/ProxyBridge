@@ -75,7 +75,7 @@ typedef struct PBProfile {
     int      osdOffsetX;          // fine-tune X offset in px
     int      osdOffsetY;          // gap / fine-tune Y offset in px
     int      osdOpacity;          // 0..100 opacity percentage (default 90)
-    int      osdScalePct;         // 75..150 scale percentage (default 100)
+    int      osdSizePx;           // 14..48 capsule height in px (default 22)
     PBConfig cfg[PB_MAX_CFG];   int cfgCount;
     PBRule   rule[PB_MAX_RULE]; int ruleCount;
     PBFilter filter[PB_MAX_FILTER]; int filterCount;

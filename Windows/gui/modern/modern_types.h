@@ -68,9 +68,9 @@ extern "C" {
 #define MODERN_OSD_DEFAULT_OPACITY      90
 #define MODERN_OSD_MIN_OPACITY          0
 #define MODERN_OSD_MAX_OPACITY          100
-#define MODERN_OSD_DEFAULT_SCALE_PCT    100
-#define MODERN_OSD_MIN_SCALE_PCT        75
-#define MODERN_OSD_MAX_SCALE_PCT        150
+#define MODERN_OSD_DEFAULT_SIZE_PX      22
+#define MODERN_OSD_MIN_SIZE_PX          14
+#define MODERN_OSD_MAX_SIZE_PX          48
 #define MODERN_POS_UNSET                INT_MIN
 
 // Data limits
@@ -106,8 +106,8 @@ typedef struct {
     int  osdAnchor;         // ModernOsdAnchor (default: OUTSIDE_TOP_LEFT)
     int  osdOffsetX;        // Fine-tune X offset in px (default 0)
     int  osdOffsetY;        // Gap / fine-tune Y offset in px (default 4)
-    int  osdOpacity;        // Opacity percentage 30..100 (default 90)
-    int  osdScalePct;       // Size scale percentage 75..150 (default 100)
+    int  osdOpacity;        // Opacity percentage 0..100 (default 90)
+    int  osdSizePx;         // Capsule height in px 14..48 (default 22)
 } ModernUiConfig;
 
 typedef struct {
@@ -159,7 +159,7 @@ static __inline void ModernUiConfig_Defaults(ModernUiConfig *cfg)
     cfg->osdOffsetX     = MODERN_OSD_DEFAULT_OFFSET_X;
     cfg->osdOffsetY     = MODERN_OSD_DEFAULT_OFFSET_Y;
     cfg->osdOpacity     = MODERN_OSD_DEFAULT_OPACITY;
-    cfg->osdScalePct    = MODERN_OSD_DEFAULT_SCALE_PCT;
+    cfg->osdSizePx      = MODERN_OSD_DEFAULT_SIZE_PX;
 }
 
 static __inline void ModernUiConfig_Sanitize(ModernUiConfig *cfg)
@@ -173,8 +173,8 @@ static __inline void ModernUiConfig_Sanitize(ModernUiConfig *cfg)
     if (cfg->osdOffsetY >  400) cfg->osdOffsetY =  400;
     if (cfg->osdOpacity < MODERN_OSD_MIN_OPACITY) cfg->osdOpacity = MODERN_OSD_MIN_OPACITY;
     if (cfg->osdOpacity > MODERN_OSD_MAX_OPACITY) cfg->osdOpacity = MODERN_OSD_MAX_OPACITY;
-    if (cfg->osdScalePct < MODERN_OSD_MIN_SCALE_PCT) cfg->osdScalePct = MODERN_OSD_MIN_SCALE_PCT;
-    if (cfg->osdScalePct > MODERN_OSD_MAX_SCALE_PCT) cfg->osdScalePct = MODERN_OSD_MAX_SCALE_PCT;
+    if (cfg->osdSizePx  < MODERN_OSD_MIN_SIZE_PX) cfg->osdSizePx  = MODERN_OSD_MIN_SIZE_PX;
+    if (cfg->osdSizePx  > MODERN_OSD_MAX_SIZE_PX) cfg->osdSizePx  = MODERN_OSD_MAX_SIZE_PX;
 }
 
 static __inline uint32_t ModernStatusColorArgb(BOOL proxyEnabled, uint32_t rttMs)

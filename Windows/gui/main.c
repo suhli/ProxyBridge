@@ -385,7 +385,7 @@ static void SyncModernFromProfile(void)
     g_modernCfg.osdOffsetX     = g_profile.osdOffsetX;
     g_modernCfg.osdOffsetY     = g_profile.osdOffsetY;
     g_modernCfg.osdOpacity     = g_profile.osdOpacity;
-    g_modernCfg.osdScalePct    = g_profile.osdScalePct;
+    g_modernCfg.osdSizePx      = g_profile.osdSizePx;
     ModernUiConfig_Sanitize(&g_modernCfg);
 }
 
@@ -405,7 +405,7 @@ static void SyncModernToProfile(void)
     g_profile.osdOffsetX     = g_modernCfg.osdOffsetX;
     g_profile.osdOffsetY     = g_modernCfg.osdOffsetY;
     g_profile.osdOpacity     = g_modernCfg.osdOpacity;
-    g_profile.osdScalePct    = g_modernCfg.osdScalePct;
+    g_profile.osdSizePx      = g_modernCfg.osdSizePx;
 }
 
 static void OnModernOsdCfgChanged(const ModernUiConfig* cfg, void* user)
