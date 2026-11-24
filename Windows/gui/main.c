@@ -177,6 +177,8 @@ static const wchar_t* ProtoName(int i)  { return i == 1 ? L"UDP" : i == 2 ? L"BO
 
 // forward decls
 static void SaveActive(void);
+static void SyncModernFromProfile(void);
+static void SyncModernToProfile(void);
 static UINT32 ResolveNativeCfg(UINT32 storedId);
 static void ApplyConfigs(void);
 static void ApplyRules(void);
@@ -335,6 +337,8 @@ static void SwitchToProfile(const wchar_t* name)
     g_autoClear = g_profile.autoClearLogs;
     g_logEvery = g_profile.logEveryConnection != 0;
     if (g_profile.fontZoom != g_zoom) { g_zoom = g_profile.fontZoom; ApplyZoom(g_hMain); }
+    SyncModernFromProfile();
+    OverlayDispatcher_SetConfig(&g_modernCfg);
     ApplyFilterSnapshot();
     g_api.SetTrafficLoggingEnabled(g_trafficLog);
     g_api.SetLogEveryConnection(g_logEvery);
@@ -366,10 +370,52 @@ static void AppendTopMenu(HMENU bar, HMENU sub, const wchar_t* label)
     InsertMenuItemW(bar, GetMenuItemCount(bar), TRUE, &mii);
 }
 
+static void SyncModernFromProfile(void)
+{
+    ModernUiConfig_Defaults(&g_modernCfg);
+    g_modernCfg.themeMode      = g_profile.themeMode;
+    g_modernCfg.capsuleEnabled = g_profile.capsuleEnabled != 0;
+    g_modernCfg.capsuleTopmost = g_profile.capsuleTopmost != 0;
+    g_modernCfg.capsuleX       = g_profile.capsuleHasPos ? g_profile.capsuleX : MODERN_POS_UNSET;
+    g_modernCfg.capsuleY       = g_profile.capsuleHasPos ? g_profile.capsuleY : MODERN_POS_UNSET;
+    g_modernCfg.osdEnabled     = g_profile.osdEnabled != 0;
+    g_modernCfg.osdCompactMode = g_profile.osdCompactMode != 0;
+    g_modernCfg.rtssEnabled    = g_profile.rtssEnabled != 0;
+    g_modernCfg.osdAnchor      = g_profile.osdAnchor;
+    g_modernCfg.osdOffsetX     = g_profile.osdOffsetX;
+    g_modernCfg.osdOffsetY     = g_profile.osdOffsetY;
+    g_modernCfg.osdOpacity     = g_profile.osdOpacity;
+    g_modernCfg.osdScalePct    = g_profile.osdScalePct;
+    ModernUiConfig_Sanitize(&g_modernCfg);
+}
+
+static void SyncModernToProfile(void)
+{
+    ModernUiConfig_Sanitize(&g_modernCfg);
+    g_profile.themeMode      = g_modernCfg.themeMode;
+    g_profile.capsuleEnabled = g_modernCfg.capsuleEnabled ? 1 : 0;
+    g_profile.capsuleTopmost = g_modernCfg.capsuleTopmost ? 1 : 0;
+    g_profile.capsuleHasPos  = (g_modernCfg.capsuleX != MODERN_POS_UNSET && g_modernCfg.capsuleY != MODERN_POS_UNSET) ? 1 : 0;
+    g_profile.capsuleX       = g_profile.capsuleHasPos ? g_modernCfg.capsuleX : 0;
+    g_profile.capsuleY       = g_profile.capsuleHasPos ? g_modernCfg.capsuleY : 0;
+    g_profile.osdEnabled     = g_modernCfg.osdEnabled ? 1 : 0;
+    g_profile.osdCompactMode = g_modernCfg.osdCompactMode ? 1 : 0;
+    g_profile.rtssEnabled    = g_modernCfg.rtssEnabled ? 1 : 0;
+    g_profile.osdAnchor      = g_modernCfg.osdAnchor;
+    g_profile.osdOffsetX     = g_modernCfg.osdOffsetX;
+    g_profile.osdOffsetY     = g_modernCfg.osdOffsetY;
+    g_profile.osdOpacity     = g_modernCfg.osdOpacity;
+    g_profile.osdScalePct    = g_modernCfg.osdScalePct;
+}
+
 static void OnModernOsdCfgChanged(const ModernUiConfig* cfg, void* user)
 {
     (void)user;
-    if (cfg) OverlayDispatcher_SetConfig(cfg);
+    if (!cfg) return;
+    g_modernCfg = *cfg;
+    SyncModernToProfile();
+    SaveActive();
+    OverlayDispatcher_SetConfig(&g_modernCfg);
 }
 
 // Builds the whole menu bar from the string table so a language switch can rebuild it live.
@@ -735,7 +781,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         LogStoreInit(&g_actStore,  g_hActLog);
         SetTimer(hwnd, TIMER_LOG, 200, NULL);   // batch log updates ~5x/sec
         StatsManager_Init();
-        ModernUiConfig_Defaults(&g_modernCfg);
+        SyncModernFromProfile();
         D2d_Init();
         OverlayDispatcher_Init(g_hInst, &g_modernCfg);
         SetTimer(hwnd, TIMER_STATS, STATS_POLL_INTERVAL_MS, NULL);

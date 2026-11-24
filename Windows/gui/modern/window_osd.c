@@ -577,7 +577,7 @@ static LRESULT CALLBACK OsdSettingsWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARA
         }
         y += 36;
 
-        MakeCtrl(hwnd, L"STATIC", L"透明度:", 0, 0, 16, y + 4, 76, 20, 0);
+        MakeCtrl(hwnd, L"STATIC", L"不透明度:", 0, 0, 16, y + 4, 76, 20, 0);
         HWND sldOp = MakeCtrl(hwnd, TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_NOTICKS | WS_TABSTOP, 0, 94, y, 204, 26, IDC_OSD_SLD_OPACITY);
         SendMessageW(sldOp, TBM_SETRANGE, TRUE, MAKELPARAM(MODERN_OSD_MIN_OPACITY, MODERN_OSD_MAX_OPACITY));
         MakeCtrl(hwnd, L"STATIC", L"90%", SS_RIGHT, 0, 304, y + 4, 46, 20, IDC_OSD_LBL_OPACITY);
@@ -595,11 +595,11 @@ static LRESULT CALLBACK OsdSettingsWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARA
         MakeCtrl(hwnd, L"EDIT", L"4", ES_AUTOHSCROLL | WS_TABSTOP, WS_EX_CLIENTEDGE, 268, y, 82, 24, IDC_OSD_EDT_OFFY);
         y += 40;
 
-        MakeCtrl(hwnd, L"STATIC", L"提示：拖动滑块或切换位置时，本窗口边缘实时预览胶囊效果。", 0, 0, 16, y, 340, 20, 0);
+        MakeCtrl(hwnd, L"STATIC", L"提示：调整参数即刻实时生效并自动保存至当前配置。", 0, 0, 16, y, 340, 20, 0);
         y += 30;
 
         MakeCtrl(hwnd, L"BUTTON", L"恢复默认", BS_PUSHBUTTON | WS_TABSTOP, 0, 16, y, 96, 28, IDC_OSD_BTN_RESET);
-        MakeCtrl(hwnd, L"BUTTON", L"关闭", BS_DEFPUSHBUTTON | WS_TABSTOP, 0, 254, y, 96, 28, IDC_OSD_BTN_CLOSE);
+        MakeCtrl(hwnd, L"BUTTON", L"保存并关闭", BS_DEFPUSHBUTTON | WS_TABSTOP, 0, 244, y, 106, 28, IDC_OSD_BTN_CLOSE);
 
         SyncControlsFromConfig(hwnd);
         return 0;
@@ -624,6 +624,7 @@ static LRESULT CALLBACK OsdSettingsWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARA
         WORD id = LOWORD(wp);
         WORD code = HIWORD(wp);
         if (id == IDC_OSD_BTN_CLOSE) {
+            ReadConfigAndApplyLive(hwnd);
             DestroyWindow(hwnd);
             return 0;
         }

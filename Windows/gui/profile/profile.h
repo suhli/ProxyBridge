@@ -61,6 +61,21 @@ typedef struct PBProfile {
     int      fontZoom;            // UI/log text zoom in percent (60-300), 100 = DPI default
     UINT32   nextCfgId;           // next stable proxy-config id to hand out (persisted; ids are never reused)
     wchar_t  language[8];         // "en" | "zh"
+    // Modern UI / Floating Capsule / OSD settings
+    int      themeMode;           // 0 = system, 1 = dark, 2 = light
+    int      capsuleEnabled;      // 1 = floating desktop capsule visible
+    int      capsuleTopmost;      // 1 = floating capsule always on top
+    int      capsuleHasPos;       // 1 = capsuleX/capsuleY saved
+    int      capsuleX;
+    int      capsuleY;
+    int      osdEnabled;          // 1 = top-left dual-mode OSD enabled
+    int      osdCompactMode;      // 1 = compact OSD template
+    int      rtssEnabled;         // 1 = Channel A (RTSS) enabled
+    int      osdAnchor;           // 0 = outside top-left (default) .. 5
+    int      osdOffsetX;          // fine-tune X offset in px
+    int      osdOffsetY;          // gap / fine-tune Y offset in px
+    int      osdOpacity;          // 0..100 opacity percentage (default 90)
+    int      osdScalePct;         // 75..150 scale percentage (default 100)
     PBConfig cfg[PB_MAX_CFG];   int cfgCount;
     PBRule   rule[PB_MAX_RULE]; int ruleCount;
     PBFilter filter[PB_MAX_FILTER]; int filterCount;

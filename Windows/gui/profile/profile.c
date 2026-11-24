@@ -284,6 +284,20 @@ void PB_ProfileDefaults(PBProfile* p, const wchar_t* name)
     p->closeToTray       = 1;
     p->fontZoom          = 100;
     lstrcpynW(p->language, L"en", 8);
+    p->themeMode         = 0;
+    p->capsuleEnabled    = 1;
+    p->capsuleTopmost    = 1;
+    p->capsuleHasPos     = 0;
+    p->capsuleX          = 0;
+    p->capsuleY          = 0;
+    p->osdEnabled        = 1;
+    p->osdCompactMode    = 0;
+    p->rtssEnabled       = 1;
+    p->osdAnchor         = 0;
+    p->osdOffsetX        = 0;
+    p->osdOffsetY        = 4;
+    p->osdOpacity        = 90;
+    p->osdScalePct       = 100;
 }
 
 // Makes proxy-config ids unique and non-zero and positions the allocator past every id in use.
@@ -331,6 +345,26 @@ void PB_ProfileLoad(const wchar_t* name, PBProfile* p)
         p->fontZoom          = (int)json_long(root, "FontZoom", 100);
         if (p->fontZoom < 60 || p->fontZoom > 300) p->fontZoom = 100;
         u2w(json_str(root, "Language", "en"), p->language, 8);
+        p->themeMode      = (int)json_long(root, "ThemeMode", 0);
+        if (p->themeMode < 0 || p->themeMode > 2) p->themeMode = 0;
+        p->capsuleEnabled = json_bool(root, "CapsuleEnabled", 1);
+        p->capsuleTopmost = json_bool(root, "CapsuleTopmost", 1);
+        p->capsuleHasPos  = json_bool(root, "CapsuleHasPos", 0);
+        p->capsuleX       = (int)json_long(root, "CapsuleX", 0);
+        p->capsuleY       = (int)json_long(root, "CapsuleY", 0);
+        p->osdEnabled     = json_bool(root, "OsdEnabled", 1);
+        p->osdCompactMode = json_bool(root, "OsdCompactMode", 0);
+        p->rtssEnabled    = json_bool(root, "RtssEnabled", 1);
+        p->osdAnchor      = (int)json_long(root, "OsdAnchor", 0);
+        if (p->osdAnchor < 0 || p->osdAnchor > 5) p->osdAnchor = 0;
+        p->osdOffsetX     = (int)json_long(root, "OsdOffsetX", 0);
+        if (p->osdOffsetX < -400 || p->osdOffsetX > 400) p->osdOffsetX = 0;
+        p->osdOffsetY     = (int)json_long(root, "OsdOffsetY", 4);
+        if (p->osdOffsetY < -400 || p->osdOffsetY > 400) p->osdOffsetY = 4;
+        p->osdOpacity     = (int)json_long(root, "OsdOpacity", 90);
+        if (p->osdOpacity < 0 || p->osdOpacity > 100) p->osdOpacity = 90;
+        p->osdScalePct    = (int)json_long(root, "OsdScalePct", 100);
+        if (p->osdScalePct < 75 || p->osdScalePct > 150) p->osdScalePct = 100;
 
         JVal* cfgs = json_get(root, "ProxyConfigs");
         if (cfgs && cfgs->type == J_ARR)
@@ -424,6 +458,35 @@ BOOL PB_ProfileSave(const wchar_t* name, const PBProfile* p)
     sb_put(&b, "  \"CloseToTray\": ");              sb_put(&b, p->closeToTray ? "true" : "false");       sb_put(&b, ",\n");
     { char zb[48]; _snprintf_s(zb, sizeof(zb), _TRUNCATE, "  \"FontZoom\": %d,\n", p->fontZoom); sb_put(&b, zb); }
     { char nb[64]; _snprintf_s(nb, sizeof(nb), _TRUNCATE, "  \"NextProxyConfigId\": %u,\n", (unsigned)(p->nextCfgId ? p->nextCfgId : 1)); sb_put(&b, nb); }
+    {
+        char mb[512];
+        _snprintf_s(mb, sizeof(mb), _TRUNCATE,
+            "  \"ThemeMode\": %d,\n"
+            "  \"CapsuleEnabled\": %s,\n"
+            "  \"CapsuleTopmost\": %s,\n"
+            "  \"CapsuleHasPos\": %s,\n"
+            "  \"CapsuleX\": %d,\n"
+            "  \"CapsuleY\": %d,\n"
+            "  \"OsdEnabled\": %s,\n"
+            "  \"OsdCompactMode\": %s,\n"
+            "  \"RtssEnabled\": %s,\n"
+            "  \"OsdAnchor\": %d,\n"
+            "  \"OsdOffsetX\": %d,\n"
+            "  \"OsdOffsetY\": %d,\n"
+            "  \"OsdOpacity\": %d,\n"
+            "  \"OsdScalePct\": %d,\n",
+            p->themeMode,
+            p->capsuleEnabled ? "true" : "false",
+            p->capsuleTopmost ? "true" : "false",
+            p->capsuleHasPos  ? "true" : "false",
+            p->capsuleX, p->capsuleY,
+            p->osdEnabled     ? "true" : "false",
+            p->osdCompactMode ? "true" : "false",
+            p->rtssEnabled    ? "true" : "false",
+            p->osdAnchor, p->osdOffsetX, p->osdOffsetY,
+            p->osdOpacity, p->osdScalePct);
+        sb_put(&b, mb);
+    }
 
     sb_put(&b, "  \"ProxyConfigs\": [");
     for (int i = 0; i < p->cfgCount; i++)
