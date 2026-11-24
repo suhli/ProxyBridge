@@ -76,6 +76,10 @@ void D2dHwnd_Destroy(D2dHwndSurface *s);
 BOOL D2dHwnd_BeginDraw(D2dHwndSurface *s);
 BOOL D2dHwnd_EndDraw(D2dHwndSurface *s);
 
+// Immediate GDI HDC Direct2D helper (anti-aliased rounded SPA buttons, segmented tabs, cards, menu pills)
+BOOL D2dDc_Begin(HDC hdc, const RECT *rc, D2dCanvas *outCanvas);
+void D2dDc_End(void);
+
 // Drawing primitives (shared by layered & HWND surfaces)
 void  D2d_SetScale(D2dCanvas *c, float scale);
 void  D2d_Clear(D2dCanvas *c, uint32_t argb);

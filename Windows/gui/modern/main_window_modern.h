@@ -57,6 +57,21 @@ void ModernMain_ApplyTheme(HWND mainHwnd, BOOL isDark);
 BOOL ModernMain_HandleNotify(LPARAM lp, LRESULT *outResult);
 BOOL ModernMain_HandleCommand(WPARAM wp, LPARAM lp, LRESULT *outResult);
 
+// Unified SPA visual styling helpers for native Win32 child controls
+typedef enum {
+    MODERN_BTN_DEFAULT = 0,
+    MODERN_BTN_PRIMARY,
+    MODERN_BTN_DANGER,
+    MODERN_BTN_ACCENT_SOFT
+} ModernBtnVariant;
+
+void ModernMain_StyleButton(HWND btn, ModernBtnVariant variant);
+void ModernMain_StyleTabStrip(HWND tab);
+void ModernMain_PaintCardDC(HDC hdc, const RECT *rc, float radius, BOOL focused);
+void ModernMain_PaintMenuPillDC(HDC hdc, const RECT *rc, BOOL hot, BOOL dimmed);
+void ModernMain_PaintActiveBodyCards(HDC hdc, const RECT *tab2SearchCard, BOOL searchVisible,
+                                     BOOL searchFocused, const RECT *tab2LogCard);
+
 // Rule-name resolver helper for StatsManager_SetRuleResolver
 void ModernMain_ResolveRuleForApp(const PBProfile *profile, const wchar_t *appName,
                                   wchar_t *ruleOut, size_t ruleCch);

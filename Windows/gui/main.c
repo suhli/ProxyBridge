@@ -62,6 +62,19 @@
 
 static HBRUSH g_brBg, g_brPanel, g_brTab, g_brTabSel, g_brTabHot, g_brAccent, g_brMenu, g_brMenuHot;
 static int    g_tabHot = -1;   // hovered tab index (owner-draw)
+static BOOL   g_uiIsDark = TRUE;
+static HBRUSH g_brModernBg = NULL;
+static HBRUSH g_brModernCard = NULL;
+static RECT   g_rcSearchCard = {0};
+static RECT   g_rcLogCard = {0};
+static BOOL   g_searchFocused = FALSE;
+static int    g_curLogSubTab = 0;
+
+static COLORREF UiClrBg(void)   { return g_uiIsDark ? MODERN_RGB_BG_DARK   : MODERN_RGB_BG_LIGHT; }
+static COLORREF UiClrCard(void) { return g_uiIsDark ? MODERN_RGB_CARD_DARK : MODERN_RGB_CARD_LIGHT; }
+static COLORREF UiClrText(void) { return g_uiIsDark ? MODERN_RGB_TEXT_DARK : MODERN_RGB_TEXT_LIGHT; }
+static COLORREF UiClrDim(void)  { return g_uiIsDark ? RGB(0x9A, 0xA0, 0xAA) : RGB(0x6B, 0x72, 0x80); }
+static COLORREF UiClrLine(void) { return g_uiIsDark ? C_LINE                : RGB(0xDC, 0xE1, 0xE8); }
 
 // Undocumented immersive-menu messages (as used by Windows Terminal's dark-mode shim).
 #define WM_UAHDRAWMENU     0x0091
@@ -138,9 +151,6 @@ static BOOL      g_started = FALSE;
 
 static PBProfile g_profile;
 static ModernUiConfig g_modernCfg;
-static BOOL      g_uiIsDark = TRUE;
-static HBRUSH    g_brModernBg = NULL;
-static int       g_curLogSubTab = 0;
 static wchar_t   g_activeProfile[PB_NAME_MAX] = L"Default";
 static BOOL      g_trafficLog = TRUE, g_closeToTray = TRUE;
 static BOOL      g_proxyEnabled = TRUE;   // main switch; not saved: ProxyBridge always starts enabled
@@ -187,6 +197,9 @@ static void SyncModernFromProfile(void);
 static void SyncModernToProfile(void);
 static void ApplyModernThemeAll(HWND hwnd);
 static void SyncMainTabVisibility(void);
+static void RebuildThemeBrushes(BOOL isDark);
+static void InitDarkMode(HWND hwnd);
+static void DrawMenuBar2(HWND hwnd);
 static UINT32 ResolveNativeCfg(UINT32 storedId);
 static void ApplyConfigs(void);
 static void ApplyRules(void);
@@ -200,10 +213,6 @@ static void ApplyZoom(HWND hwnd);
 static void RelocalizeUI(HWND hwnd);
 static UINT32 EngineAddRule(PBRule* r);
 static void EngineEditRule(PBRule* r);
-static void SyncModernFromProfile(void);
-static void SyncModernToProfile(void);
-static void ApplyModernThemeAll(HWND hwnd);
-static void SyncMainTabVisibility(void);
 INT_PTR CALLBACK ServersDlgProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK ServerEditDlgProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK RulesDlgProc(HWND, UINT, WPARAM, LPARAM);
@@ -446,14 +455,24 @@ static void ApplyModernThemeAll(HWND hwnd)
 {
     if (!hwnd || !IsWindow(hwnd)) return;
     g_uiIsDark = D2d_ResolveDarkMode(g_modernCfg.themeMode);
+    RebuildThemeBrushes(g_uiIsDark);
     if (g_brModernBg) DeleteObject(g_brModernBg);
-    g_brModernBg = CreateSolidBrush(g_uiIsDark ? MODERN_RGB_BG_DARK : MODERN_RGB_BG_LIGHT);
+    g_brModernBg = CreateSolidBrush(UiClrBg());
+    if (g_brModernCard) DeleteObject(g_brModernCard);
+    g_brModernCard = CreateSolidBrush(UiClrCard());
 
+    InitDarkMode(hwnd);
     ModernMain_ApplyTheme(hwnd, g_uiIsDark);
     const wchar_t* expTheme = g_uiIsDark ? L"DarkMode_Explorer" : L"Explorer";
-    if (g_hConnLog) SetWindowTheme(g_hConnLog, expTheme, NULL);
-    if (g_hActLog)  SetWindowTheme(g_hActLog,  expTheme, NULL);
-    if (g_hTab)     SetWindowTheme(g_hTab,     expTheme, NULL);
+    const wchar_t* cfdTheme = g_uiIsDark ? L"DarkMode_CFD"      : L"Explorer";
+    if (g_hConnLog)    SetWindowTheme(g_hConnLog,    expTheme, NULL);
+    if (g_hActLog)     SetWindowTheme(g_hActLog,     expTheme, NULL);
+    if (g_hTab)        SetWindowTheme(g_hTab,        expTheme, NULL);
+    if (g_hConnSearch) SetWindowTheme(g_hConnSearch, cfdTheme, NULL);
+    if (g_hActSearch)  SetWindowTheme(g_hActSearch,  cfdTheme, NULL);
+    if (g_hConnClear)  SetWindowTheme(g_hConnClear,  expTheme, NULL);
+    if (g_hActClear)   SetWindowTheme(g_hActClear,   expTheme, NULL);
+    if (g_hFlowsClear) SetWindowTheme(g_hFlowsClear, expTheme, NULL);
     if (g_hFlows)
     {
         COLORREF bg  = g_uiIsDark ? MODERN_RGB_CARD_DARK : MODERN_RGB_CARD_LIGHT;
@@ -466,7 +485,8 @@ static void ApplyModernThemeAll(HWND hwnd)
     }
     FloatingCapsule_ApplyConfig(&g_modernCfg);
     OverlayDispatcher_SetConfig(&g_modernCfg);
-    InvalidateRect(hwnd, NULL, TRUE);
+    RedrawWindow(hwnd, NULL, NULL, RDW_FRAME | RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+    DrawMenuBar2(hwnd);
 }
 
 static void OnModernOsdCfgChanged(const ModernUiConfig* cfg, void* user)
@@ -839,28 +859,43 @@ static void LayoutMain(HWND hwnd)
     ModernMain_Layout(hwnd, rc.right, rc.bottom, &tab2Top);
 
     int padX = Sc(14);
-    int tabH = Sc(30);
-    int tabW = rc.right - padX * 2 - Sc(224);
+    int tabH = Sc(32);
+    int tabW = rc.right - padX * 2 - Sc(236);
     if (tabW < Sc(180)) tabW = rc.right - padX * 2;
     if (tabW < 40) tabW = 40;
     MoveWindow(g_hTab, padX, tab2Top, tabW, tabH, TRUE);
 
-    int top = tab2Top + tabH + Sc(6);
-    int barH = Sc(30), clearW = Sc(130), gap = Sc(6);
+    int top = tab2Top + tabH + Sc(10);
+    int barH = Sc(34), clearW = Sc(132), gap = Sc(10);
     int searchW = rc.right - padX * 2 - clearW - gap;
     if (searchW < 40) searchW = 40;
-    int logTop = top + barH + 4;
+    int logTop = top + barH + Sc(10);
     int logH = rc.bottom - logTop - Sc(12); if (logH < 0) logH = 0;
     int logW = rc.right - padX * 2; if (logW < 0) logW = 0;
-    // search box + Clear button row, then the log below (both tabs share the same rect)
-    MoveWindow(g_hConnSearch, padX, top, searchW, barH - 6, TRUE);
-    MoveWindow(g_hActSearch,  padX, top, searchW, barH - 6, TRUE);
-    MoveWindow(g_hConnClear,  padX + searchW + gap, top - 1, clearW, barH - 2, TRUE);
-    MoveWindow(g_hActClear,   padX + searchW + gap, top - 1, clearW, barH - 2, TRUE);
-    MoveWindow(g_hConnLog,    padX, logTop, logW, logH, TRUE);
-    MoveWindow(g_hActLog,     padX, logTop, logW, logH, TRUE);
-    MoveWindow(g_hFlowsClear, padX, top - 1, clearW, barH - 2, TRUE);
-    MoveWindow(g_hFlows,      padX, logTop, logW, logH, TRUE);
+
+    // Rounded SPA card rects for search input and log/flows viewport
+    SetRect(&g_rcSearchCard, padX, top, padX + searchW, top + barH);
+    SetRect(&g_rcLogCard,    padX, logTop, padX + logW, logTop + logH);
+
+    int editH = Sc(19);
+    if (editH > barH - 6) editH = barH - 6;
+    if (editH < 12) editH = 12;
+    int editY = top + (barH - editH) / 2;
+    int editW = searchW - Sc(20); if (editW < 20) editW = 20;
+
+    int cardInX = 8, cardInY = 6;
+    int innerLogW = logW - cardInX * 2; if (innerLogW < 0) innerLogW = 0;
+    int innerLogH = logH - cardInY * 2; if (innerLogH < 0) innerLogH = 0;
+
+    MoveWindow(g_hConnSearch, padX + Sc(10), editY, editW, editH, TRUE);
+    MoveWindow(g_hActSearch,  padX + Sc(10), editY, editW, editH, TRUE);
+    MoveWindow(g_hConnClear,  padX + searchW + gap, top, clearW, barH, TRUE);
+    MoveWindow(g_hActClear,   padX + searchW + gap, top, clearW, barH, TRUE);
+    MoveWindow(g_hConnLog,    padX + cardInX, logTop + cardInY, innerLogW, innerLogH, TRUE);
+    MoveWindow(g_hActLog,     padX + cardInX, logTop + cardInY, innerLogW, innerLogH, TRUE);
+    MoveWindow(g_hFlowsClear, padX, top, clearW, barH, TRUE);
+    MoveWindow(g_hFlows,      padX + cardInX, logTop + cardInY, innerLogW, innerLogH, TRUE);
+    InvalidateRect(hwnd, NULL, FALSE);
 }
 static void SyncMainTabVisibility(void)
 {
@@ -873,6 +908,7 @@ static void SyncMainTabVisibility(void)
     FlowsActivate(g_hMain, onLogs && g_curLogSubTab == 2);
     ShowWindow(g_hConnLog, c); ShowWindow(g_hConnSearch, c); ShowWindow(g_hConnClear, c);
     ShowWindow(g_hActLog,  a); ShowWindow(g_hActSearch,  a); ShowWindow(g_hActClear,  a);
+    if (g_hMain) InvalidateRect(g_hMain, NULL, FALSE);
 }
 static void SelectTab(int idx)
 {
@@ -948,7 +984,7 @@ static void DrawMenuBar2(HWND hwnd)
         MENUITEMINFOW mii; mii.cbSize = sizeof(mii); mii.fMask = MIIM_STRING;
         mii.dwTypeData = txt; mii.cch = 64;
         GetMenuItemInfoW(bar, i, TRUE, &mii);
-        SetTextColor(dc, C_TEXT);
+        SetTextColor(dc, UiClrText());
         DrawTextW(dc, txt, -1, &ir, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_HIDEPREFIX);
         if (ir.right > lastRight) lastRight = ir.right;
     }
@@ -962,8 +998,9 @@ static void DrawMenuBar2(HWND hwnd)
     RECT* r[2] = { &g_rcTbSet, &g_rcTbRules };
     for (int i = 0; i < 2; i++)
     {
-        FillRect(dc, r[i], (g_tbHot == i) ? g_brMenuHot : g_brMenu);
-        SetTextColor(dc, (g_tbHot == i) ? C_TEXT : C_DIM);
+        ModernMain_PaintMenuPillDC(dc, r[i], g_tbHot == i, FALSE);
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, (g_tbHot == i) ? UiClrText() : UiClrDim());
         DrawTextW(dc, glyph[i], -1, r[i], DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
     SelectObject(dc, of);
@@ -991,10 +1028,16 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         ti.pszText = (LPWSTR)T(S_TAB_ACT);  TabCtrl_InsertItem(g_hTab, 1, &ti);
         ti.pszText = (LPWSTR)T(S_TAB_FLOWS); TabCtrl_InsertItem(g_hTab, 2, &ti);
         FlowsCreate(hwnd);
+        if (g_hFlows)
+        {
+            SetWindowLongW(g_hFlows, GWL_STYLE, GetWindowLongW(g_hFlows, GWL_STYLE) & ~WS_BORDER);
+            SetWindowLongW(g_hFlows, GWL_EXSTYLE, GetWindowLongW(g_hFlows, GWL_EXSTYLE) & ~WS_EX_CLIENTEDGE);
+            SetWindowPos(g_hFlows, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+        }
         SendMessageW(g_hFlows, WM_SETFONT, (WPARAM)g_hUi, TRUE);
-    SendMessageW(g_hFlowsClear, WM_SETFONT, (WPARAM)g_hUi, TRUE);
+        SendMessageW(g_hFlowsClear, WM_SETFONT, (WPARAM)g_hUi, TRUE);
 
-        DWORD es = WS_CHILD | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_BORDER;
+        DWORD es = WS_CHILD | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL;
         g_hConnLog = CreateWindowExW(0, L"EDIT", NULL, es | WS_VISIBLE, 0, 0, 0, 0, hwnd, NULL, g_hInst, NULL);
         g_hActLog  = CreateWindowExW(0, L"EDIT", NULL, es,               0, 0, 0, 0, hwnd, NULL, g_hInst, NULL);
         SendMessageW(g_hConnLog, WM_SETFONT, (WPARAM)g_hMono, TRUE);
@@ -1040,10 +1083,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         if (SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(ncm), &ncm, 0))
             g_hMenuFont = CreateFontIndirectW(&ncm.lfMenuFont);
 
-        // Dark/Light adaptive theme + hover tracking for owner-drawn log sub-tabs.
-        InitDarkMode(hwnd);
+        // Dark/Light adaptive theme + unified Web-SPA rounded controls (segmented tabs & pill buttons).
+        ModernMain_StyleTabStrip(g_hTab);
+        ModernMain_StyleButton(g_hConnClear,  MODERN_BTN_DANGER);
+        ModernMain_StyleButton(g_hActClear,   MODERN_BTN_DANGER);
+        ModernMain_StyleButton(g_hFlowsClear, MODERN_BTN_DANGER);
         ApplyModernThemeAll(hwnd);
-        SetWindowSubclass(g_hTab, TabSubProc, 1, 0);
 
         ModernMain_SetTab(MODERN_MAIN_TAB_APPS);
         LayoutMain(hwnd);
@@ -1056,10 +1101,17 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             ApplyModernThemeAll(hwnd);
         return 0;
     case WM_ERASEBKGND:
-    {
-        RECT rc; GetClientRect(hwnd, &rc);
-        FillRect((HDC)wp, &rc, g_brModernBg ? g_brModernBg : g_brBg);
         return 1;
+    case WM_PAINT:
+    {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+        RECT rc; GetClientRect(hwnd, &rc);
+        FillRect(hdc, &rc, g_brModernBg ? g_brModernBg : g_brBg);
+        BOOL showSearch = (g_curLogSubTab == 0 || g_curLogSubTab == 1);
+        ModernMain_PaintActiveBodyCards(hdc, &g_rcSearchCard, showSearch, g_searchFocused, &g_rcLogCard);
+        EndPaint(hwnd, &ps);
+        return 0;
     }
     case WM_MOUSEWHEEL:
         if (GET_KEYSTATE_WPARAM(wp) & MK_CONTROL)
@@ -1075,10 +1127,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_CTLCOLORSTATIC:
     {
         HDC dc = (HDC)wp;
-        COLORREF textClr = g_uiIsDark ? MODERN_RGB_TEXT_DARK : MODERN_RGB_TEXT_LIGHT;
-        COLORREF bgClr   = g_uiIsDark ? MODERN_RGB_BG_DARK   : MODERN_RGB_BG_LIGHT;
+        HWND ctl = (HWND)lp;
+        BOOL isCardEdit = (ctl == g_hConnSearch || ctl == g_hActSearch ||
+                           ctl == g_hConnLog    || ctl == g_hActLog);
+        COLORREF textClr = UiClrText();
+        COLORREF bgClr   = isCardEdit ? UiClrCard() : UiClrBg();
         SetTextColor(dc, textClr);
         SetBkColor(dc, bgClr);
+        if (isCardEdit && g_brModernCard) return (LRESULT)g_brModernCard;
         return (LRESULT)(g_brModernBg ? g_brModernBg : g_brBg);
     }
     case WM_MEASUREITEM:
@@ -1108,9 +1164,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         {
             const wchar_t* txt = (const wchar_t*)d->itemData;
             BOOL hot = (d->itemState & (ODS_SELECTED | ODS_HOTLIGHT)) != 0;
-            FillRect(d->hDC, &d->rcItem, hot ? g_brMenuHot : g_brMenu);
+            ModernMain_PaintMenuPillDC(d->hDC, &d->rcItem, hot, FALSE);
             SetBkMode(d->hDC, TRANSPARENT);
-            SetTextColor(d->hDC, C_TEXT);
+            SetTextColor(d->hDC, UiClrText());
             HFONT of = (HFONT)SelectObject(d->hDC, g_hMenuFont ? g_hMenuFont : g_hUi);
             UINT f = DT_CENTER | DT_VCENTER | DT_SINGLELINE;
             if (d->itemState & ODS_NOACCEL) f |= DT_HIDEPREFIX;
@@ -1132,7 +1188,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             TCITEMW ti; ti.mask = TCIF_TEXT; ti.pszText = txt; ti.cchTextMax = 64;
             TabCtrl_GetItem(g_hTab, d->itemID, &ti);
             SetBkMode(d->hDC, TRANSPARENT);
-            SetTextColor(d->hDC, sel ? C_TEXT : C_DIM);
+            SetTextColor(d->hDC, sel ? UiClrText() : UiClrDim());
             DrawTextW(d->hDC, txt, -1, &d->rcItem, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             return TRUE;
         }
@@ -1156,10 +1212,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         mii.fMask = MIIM_STRING; mii.dwTypeData = txt; mii.cch = 128;
         GetMenuItemInfoW(pmi->um.hmenu, (UINT)pmi->umi.iPosition, TRUE, &mii);
         BOOL hot = (pmi->dis.itemState & (ODS_HOTLIGHT | ODS_SELECTED)) != 0;
-        FillRect(pmi->um.hdc, &pmi->dis.rcItem, hot ? g_brMenuHot : g_brMenu);
+        ModernMain_PaintMenuPillDC(pmi->um.hdc, &pmi->dis.rcItem, hot, FALSE);
         SetBkMode(pmi->um.hdc, TRANSPARENT);
         SetTextColor(pmi->um.hdc,
-                     (pmi->dis.itemState & (ODS_GRAYED | ODS_DISABLED)) ? C_DIM : C_TEXT);
+                     (pmi->dis.itemState & (ODS_GRAYED | ODS_DISABLED)) ? UiClrDim() : UiClrText());
         DrawTextW(pmi->um.hdc, txt, -1, &pmi->dis.rcItem, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         return TRUE;
     }
@@ -1329,10 +1385,18 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case IDC_CONN_SEARCH:
             if (HIWORD(wp) == EN_CHANGE)
             { GetWindowTextW(g_hConnSearch, g_connStore.filter, 128); LogStoreRebuild(&g_connStore); }
+            else if (HIWORD(wp) == EN_SETFOCUS)
+            { g_searchFocused = TRUE; InvalidateRect(hwnd, &g_rcSearchCard, FALSE); }
+            else if (HIWORD(wp) == EN_KILLFOCUS)
+            { g_searchFocused = FALSE; InvalidateRect(hwnd, &g_rcSearchCard, FALSE); }
             return 0;
         case IDC_ACT_SEARCH:
             if (HIWORD(wp) == EN_CHANGE)
             { GetWindowTextW(g_hActSearch, g_actStore.filter, 128); LogStoreRebuild(&g_actStore); }
+            else if (HIWORD(wp) == EN_SETFOCUS)
+            { g_searchFocused = TRUE; InvalidateRect(hwnd, &g_rcSearchCard, FALSE); }
+            else if (HIWORD(wp) == EN_KILLFOCUS)
+            { g_searchFocused = FALSE; InvalidateRect(hwnd, &g_rcSearchCard, FALSE); }
             return 0;
         case IDM_PROFILE_NEW:
             if (DialogBoxW(g_hInst, MAKEINTRESOURCEW(IDD_NAME), hwnd, NameDlgProc) && g_nameResult[0])
@@ -1402,7 +1466,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         ModernMain_Shutdown();
         StatsManager_Shutdown();
         D2d_Shutdown();
-        if (g_brModernBg) { DeleteObject(g_brModernBg); g_brModernBg = NULL; }
+        if (g_brModernBg)   { DeleteObject(g_brModernBg);   g_brModernBg = NULL; }
+        if (g_brModernCard) { DeleteObject(g_brModernCard); g_brModernCard = NULL; }
         KillTimer(hwnd, TIMER_LOG);
         LogStoreFree(&g_connStore);    // release buffered + pending log lines + the lock
         LogStoreFree(&g_actStore);
@@ -1562,7 +1627,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrev, PWSTR cmd, int show)
             if (winH > maxH) winH = maxH;
         }
     }
-    g_hMain = CreateWindowExW(0, WND_CLASS, APP_TITLE, WS_OVERLAPPEDWINDOW,
+    g_hMain = CreateWindowExW(0, WND_CLASS, APP_TITLE, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                               CW_USEDEFAULT, CW_USEDEFAULT, winW, winH, NULL, NULL, hInst, NULL);
     if (!g_hMain) return 1;
 

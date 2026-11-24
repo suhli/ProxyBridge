@@ -52,6 +52,8 @@ static int                      g_dpi = 96;
 
 static HWND                     g_hAppsLv = NULL;
 static HWND                     g_hRulesLv = NULL;
+static RECT                     g_rcAppsCard = {0};
+static RECT                     g_rcRulesCard = {0};
 static HWND                     g_hRuleBtns[7]; // add, edit, toggle, up, down, del, servers
 static HWND                     g_hLogsStatsBtn = NULL;
 static HIMAGELIST               g_hRowImgList = NULL;
@@ -582,16 +584,26 @@ BOOL ModernMain_Init(HWND mainHwnd, HINSTANCE hInst, int dpi,
         IDC_MOD_RULE_ADD, IDC_MOD_RULE_EDIT, IDC_MOD_RULE_TOGGLE,
         IDC_MOD_RULE_UP, IDC_MOD_RULE_DOWN, IDC_MOD_RULE_DEL, IDC_MOD_RULE_SERVERS
     };
+    static const ModernBtnVariant btnVars[7] = {
+        MODERN_BTN_PRIMARY, MODERN_BTN_DEFAULT, MODERN_BTN_DEFAULT,
+        MODERN_BTN_DEFAULT, MODERN_BTN_DEFAULT, MODERN_BTN_DANGER, MODERN_BTN_DEFAULT
+    };
     for (int i = 0; i < 7; i++) {
         g_hRuleBtns[i] = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP,
                                          0, 0, 0, 0, mainHwnd, (HMENU)(UINT_PTR)btnIds[i], hInst, NULL);
-        if (g_hRuleBtns[i]) SendMessageW(g_hRuleBtns[i], WM_SETFONT, (WPARAM)g_hUiFont, TRUE);
+        if (g_hRuleBtns[i]) {
+            SendMessageW(g_hRuleBtns[i], WM_SETFONT, (WPARAM)g_hUiFont, TRUE);
+            ModernMain_StyleButton(g_hRuleBtns[i], btnVars[i]);
+        }
     }
 
     // Tab 2 quick button to open Telemetry / OSD / Capsule settings
     g_hLogsStatsBtn = CreateWindowExW(0, L"BUTTON", L"", WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP,
                                       0, 0, 0, 0, mainHwnd, (HMENU)(UINT_PTR)IDC_MOD_LOGS_STATS, hInst, NULL);
-    if (g_hLogsStatsBtn) SendMessageW(g_hLogsStatsBtn, WM_SETFONT, (WPARAM)g_hUiFont, TRUE);
+    if (g_hLogsStatsBtn) {
+        SendMessageW(g_hLogsStatsBtn, WM_SETFONT, (WPARAM)g_hUiFont, TRUE);
+        ModernMain_StyleButton(g_hLogsStatsBtn, MODERN_BTN_ACCENT_SOFT);
+    }
 
     UpdateLocalizedLabels();
     ModernMain_ApplyTheme(mainHwnd, g_isDark);
@@ -633,13 +645,19 @@ void ModernMain_Layout(HWND mainHwnd, int clientW, int clientH, int *outTab2Cont
     int bodyW = clientW - pad * 2;
     if (bodyW < 0) bodyW = 0;
 
-    // Tab 0: Active Apps Monitor
-    if (g_hAppsLv) MoveWindow(g_hAppsLv, pad, bodyY, bodyW, bodyH, TRUE);
+    // Tab 0: Active Apps Monitor (inset cleanly inside a rounded SPA card)
+    int cardInset = 6;
+    SetRect(&g_rcAppsCard, pad, bodyY, pad + bodyW, bodyY + bodyH);
+    if (g_hAppsLv) {
+        int lw = bodyW - cardInset * 2; if (lw < 0) lw = 0;
+        int lh = bodyH - cardInset * 2; if (lh < 0) lh = 0;
+        MoveWindow(g_hAppsLv, pad + cardInset, bodyY + cardInset, lw, lh, TRUE);
+    }
 
-    // Tab 1: Proxy Rules Toolbar + ListView
-    int tbH = MSc(30);
+    // Tab 1: Proxy Rules Toolbar + ListView (inset cleanly inside a rounded SPA card)
+    int tbH = MSc(32);
     int bx = pad;
-    static const int bw[7] = { 96, 66, 94, 60, 60, 66, 128 };
+    static const int bw[7] = { 100, 68, 96, 62, 62, 68, 130 };
     for (int i = 0; i < 7; i++) {
         int wBtn = MSc(bw[i]);
         if (i == 6) {
@@ -649,15 +667,20 @@ void ModernMain_Layout(HWND mainHwnd, int clientW, int clientH, int *outTab2Cont
         if (g_hRuleBtns[i]) MoveWindow(g_hRuleBtns[i], bx, bodyY, wBtn, tbH, TRUE);
         bx += wBtn + 8;
     }
-    int rulesTop = bodyY + tbH + 8;
+    int rulesTop = bodyY + tbH + 10;
     int rulesH   = clientH - rulesTop - 12;
     if (rulesH < 0) rulesH = 0;
-    if (g_hRulesLv) MoveWindow(g_hRulesLv, pad, rulesTop, bodyW, rulesH, TRUE);
+    SetRect(&g_rcRulesCard, pad, rulesTop, pad + bodyW, rulesTop + rulesH);
+    if (g_hRulesLv) {
+        int lw = bodyW - cardInset * 2; if (lw < 0) lw = 0;
+        int lh = rulesH - cardInset * 2; if (lh < 0) lh = 0;
+        MoveWindow(g_hRulesLv, pad + cardInset, rulesTop + cardInset, lw, lh, TRUE);
+    }
 
-    // Tab 2: Quick settings button at top-right of Logs strip
-    int statsBtnW = MSc(230);
+    // Tab 2: Quick settings pill button at top-right of Logs strip
+    int statsBtnW = MSc(228);
     if (g_hLogsStatsBtn) {
-        MoveWindow(g_hLogsStatsBtn, pad + bodyW - statsBtnW, bodyY, statsBtnW, tbH - 2, TRUE);
+        MoveWindow(g_hLogsStatsBtn, pad + bodyW - statsBtnW, bodyY, statsBtnW, tbH, TRUE);
     }
 
     if (outTab2ContentTop) *outTab2ContentTop = bodyY;
@@ -668,6 +691,7 @@ void ModernMain_SetTab(ModernMainTab tab)
     g_curTab = tab;
     UpdateTabControlVisibility();
     if (g_hHeader) InvalidateRect(g_hHeader, NULL, FALSE);
+    if (g_mainHwnd) InvalidateRect(g_mainHwnd, NULL, TRUE);
 }
 
 ModernMainTab ModernMain_GetTab(void)
@@ -695,9 +719,9 @@ void ModernMain_ApplyTheme(HWND mainHwnd, BOOL isDark)
     StyleListViewColors(g_hAppsLv, isDark);
     StyleListViewColors(g_hRulesLv, isDark);
     for (int i = 0; i < 7; i++) {
-        if (g_hRuleBtns[i]) SetWindowTheme(g_hRuleBtns[i], isDark ? L"DarkMode_Explorer" : L"Explorer", NULL);
+        if (g_hRuleBtns[i]) InvalidateRect(g_hRuleBtns[i], NULL, FALSE);
     }
-    if (g_hLogsStatsBtn) SetWindowTheme(g_hLogsStatsBtn, isDark ? L"DarkMode_Explorer" : L"Explorer", NULL);
+    if (g_hLogsStatsBtn) InvalidateRect(g_hLogsStatsBtn, NULL, FALSE);
     if (g_hHeader) InvalidateRect(g_hHeader, NULL, FALSE);
 }
 
@@ -902,6 +926,341 @@ BOOL ModernMain_HandleCommand(WPARAM wp, LPARAM lp, LRESULT *outResult)
     }
     if (outResult) *outResult = 0;
     return TRUE;
+}
+
+// ============================================================================
+// Unified Web-SPA Styled Native Controls (Rounded Buttons, Segmented Tabs, Cards)
+// ============================================================================
+
+#define SUBCLASS_SPA_BTN   ((UINT_PTR)0x50A1)
+#define SUBCLASS_SPA_TAB   ((UINT_PTR)0x50A2)
+#define PROP_SPA_BTN_STATE L"PbSpaBtnState"
+#define PROP_SPA_TAB_HOT   L"PbSpaTabHot"
+
+static LRESULT CALLBACK SpaButtonSubProc(HWND h, UINT m, WPARAM w, LPARAM l, UINT_PTR id, DWORD_PTR ref)
+{
+    (void)id;
+    ModernBtnVariant variant = (ModernBtnVariant)ref;
+    switch (m) {
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_SETCURSOR:
+        if (IsWindowEnabled(h)) {
+            SetCursor(LoadCursorW(NULL, IDC_HAND));
+            return TRUE;
+        }
+        break;
+    case WM_MOUSEMOVE:
+    {
+        ULONG_PTR st = (ULONG_PTR)GetPropW(h, PROP_SPA_BTN_STATE);
+        if ((st & 1u) == 0) {
+            SetPropW(h, PROP_SPA_BTN_STATE, (HANDLE)(st | 1u));
+            TRACKMOUSEEVENT tme = { sizeof(tme), TME_LEAVE, h, 0 };
+            TrackMouseEvent(&tme);
+            InvalidateRect(h, NULL, FALSE);
+        }
+        break;
+    }
+    case WM_MOUSELEAVE:
+    {
+        ULONG_PTR st = (ULONG_PTR)GetPropW(h, PROP_SPA_BTN_STATE);
+        SetPropW(h, PROP_SPA_BTN_STATE, (HANDLE)(st & ~3u));
+        InvalidateRect(h, NULL, FALSE);
+        break;
+    }
+    case WM_LBUTTONDOWN:
+    {
+        ULONG_PTR st = (ULONG_PTR)GetPropW(h, PROP_SPA_BTN_STATE);
+        SetPropW(h, PROP_SPA_BTN_STATE, (HANDLE)(st | 2u));
+        InvalidateRect(h, NULL, FALSE);
+        break;
+    }
+    case WM_LBUTTONUP:
+    case WM_CAPTURECHANGED:
+    {
+        ULONG_PTR st = (ULONG_PTR)GetPropW(h, PROP_SPA_BTN_STATE);
+        if (st & 2u) {
+            SetPropW(h, PROP_SPA_BTN_STATE, (HANDLE)(st & ~2u));
+            InvalidateRect(h, NULL, FALSE);
+        }
+        break;
+    }
+    case WM_SETTEXT:
+    case WM_ENABLE:
+    case WM_SETFOCUS:
+    case WM_KILLFOCUS:
+    {
+        LRESULT r = DefSubclassProc(h, m, w, l);
+        InvalidateRect(h, NULL, FALSE);
+        return r;
+    }
+    case WM_NCDESTROY:
+        RemovePropW(h, PROP_SPA_BTN_STATE);
+        break;
+    case WM_PAINT:
+    {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(h, &ps);
+        RECT rc;
+        GetClientRect(h, &rc);
+        float W = (float)(rc.right - rc.left);
+        float H = (float)(rc.bottom - rc.top);
+
+        ULONG_PTR st = (ULONG_PTR)GetPropW(h, PROP_SPA_BTN_STATE);
+        BOOL hot     = (st & 1u) != 0;
+        BOOL down    = (st & 2u) != 0;
+        BOOL enabled = IsWindowEnabled(h);
+
+        uint32_t canvasBg = g_isDark ? 0xFF1C1C1Fu : 0xFFF3F4F6u;
+        uint32_t fillClr, borderClr, textClr;
+
+        if (variant == MODERN_BTN_PRIMARY) {
+            fillClr   = down ? 0xFF005A9Eu : (hot ? 0xFF106EBEu : 0xFF0078D4u);
+            borderClr = fillClr;
+            textClr   = 0xFFFFFFFFu;
+        } else if (variant == MODERN_BTN_DANGER) {
+            if (g_isDark) {
+                fillClr   = down ? 0xFF42272Eu : (hot ? 0xFF352429u : 0xFF281F22u);
+                borderClr = hot ? 0xFF7F343Fu : 0xFF562C33u;
+                textClr   = 0xFFF87171u;
+            } else {
+                fillClr   = down ? 0xFFFEE2E2u : (hot ? 0xFFFEF2F2u : 0xFFFFFFFFu);
+                borderClr = hot ? 0xFFFCA5A5u : 0xFFF0D4D4u;
+                textClr   = 0xFFDC2626u;
+            }
+        } else if (variant == MODERN_BTN_ACCENT_SOFT) {
+            if (g_isDark) {
+                fillClr   = down ? 0xFF284A44u : (hot ? 0xFF223E39u : 0xFF1A312Du);
+                borderClr = hot ? 0xFF397066u : 0xFF2B564Eu;
+                textClr   = 0xFF34D399u;
+            } else {
+                fillClr   = down ? 0xFFC4E7DDu : (hot ? 0xFFD6EFE8u : 0xFFE8F5F1u);
+                borderClr = hot ? 0xFF8CD0BDu : 0xFFBAE2D6u;
+                textClr   = 0xFF0F766Eu;
+            }
+        } else {
+            if (g_isDark) {
+                fillClr   = down ? 0xFF393C45u : (hot ? 0xFF303239u : 0xFF26272Cu);
+                borderClr = hot ? 0xFF4C505Eu : 0xFF3A3D47u;
+                textClr   = 0xFFF1F3F6u;
+            } else {
+                fillClr   = down ? 0xFFE6EBF2u : (hot ? 0xFFF4F6FAu : 0xFFFFFFFFu);
+                borderClr = hot ? 0xFFC5CEDBu : 0xFFDDE2EAu;
+                textClr   = 0xFF111827u;
+            }
+        }
+        if (!enabled) {
+            textClr = g_isDark ? 0xFF666B77u : 0xFF9CA3AFu;
+        }
+
+        wchar_t txt[128] = {0};
+        GetWindowTextW(h, txt, ARRAYSIZE(txt));
+
+        D2dCanvas c;
+        if (D2dDc_Begin(hdc, &rc, &c)) {
+            D2d_FillRect(&c, 0.0f, 0.0f, W, H, canvasBg);
+            float rad = (H <= 36.0f) ? 8.0f : 10.0f;
+            D2d_FillRoundedRect(&c, 0.5f, 0.5f, W - 1.0f, H - 1.0f, rad, rad, fillClr);
+            D2d_DrawRoundedRect(&c, 0.5f, 0.5f, W - 1.0f, H - 1.0f, rad, rad, 1.0f, borderClr);
+            D2d_DrawText(&c, D2D_FONT_UI_12, txt, 6.0f, 0.0f, W - 12.0f, H, textClr, D2D_ALIGN_CENTER, FALSE);
+            D2dDc_End();
+        } else {
+            HBRUSH br = CreateSolidBrush(g_isDark ? MODERN_RGB_CARD_DARK : MODERN_RGB_CARD_LIGHT);
+            FillRect(hdc, &rc, br);
+            DeleteObject(br);
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, g_isDark ? MODERN_RGB_TEXT_DARK : MODERN_RGB_TEXT_LIGHT);
+            DrawTextW(hdc, txt, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        }
+        EndPaint(h, &ps);
+        return 0;
+    }
+    }
+    return DefSubclassProc(h, m, w, l);
+}
+
+void ModernMain_StyleButton(HWND btn, ModernBtnVariant variant)
+{
+    if (!btn || !IsWindow(btn)) return;
+    SetWindowSubclass(btn, SpaButtonSubProc, SUBCLASS_SPA_BTN, (DWORD_PTR)variant);
+    InvalidateRect(btn, NULL, FALSE);
+}
+
+static LRESULT CALLBACK SpaTabSubProc(HWND h, UINT m, WPARAM w, LPARAM l, UINT_PTR id, DWORD_PTR ref)
+{
+    (void)id; (void)ref;
+    switch (m) {
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_SETCURSOR:
+        SetCursor(LoadCursorW(NULL, IDC_HAND));
+        return TRUE;
+    case WM_MOUSEMOVE:
+    {
+        TCHITTESTINFO ht;
+        ht.pt.x  = (SHORT)LOWORD(l);
+        ht.pt.y  = (SHORT)HIWORD(l);
+        ht.flags = 0;
+        int hit  = TabCtrl_HitTest(h, &ht);
+        int prev = (int)(INT_PTR)GetPropW(h, PROP_SPA_TAB_HOT) - 1;
+        if (hit != prev) {
+            SetPropW(h, PROP_SPA_TAB_HOT, (HANDLE)(INT_PTR)(hit + 1));
+            InvalidateRect(h, NULL, FALSE);
+            TRACKMOUSEEVENT tme = { sizeof(tme), TME_LEAVE, h, 0 };
+            TrackMouseEvent(&tme);
+        }
+        break;
+    }
+    case WM_MOUSELEAVE:
+        SetPropW(h, PROP_SPA_TAB_HOT, (HANDLE)(INT_PTR)0);
+        InvalidateRect(h, NULL, FALSE);
+        break;
+    case WM_NCDESTROY:
+        RemovePropW(h, PROP_SPA_TAB_HOT);
+        break;
+    case WM_PAINT:
+    {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(h, &ps);
+        RECT rc;
+        GetClientRect(h, &rc);
+        float W = (float)(rc.right - rc.left);
+        float H = (float)(rc.bottom - rc.top);
+
+        int count = TabCtrl_GetItemCount(h);
+        int sel   = TabCtrl_GetCurSel(h);
+        int hot   = (int)(INT_PTR)GetPropW(h, PROP_SPA_TAB_HOT) - 1;
+
+        D2dCanvas c;
+        if (D2dDc_Begin(hdc, &rc, &c)) {
+            uint32_t canvasBg  = g_isDark ? 0xFF1C1C1Fu : 0xFFF3F4F6u;
+            uint32_t trackBg   = g_isDark ? 0xFF25262Cu : 0xFFE5E9F0u;
+            uint32_t pillSelBg = g_isDark ? 0xFF353741u : 0xFFFFFFFFu;
+            uint32_t pillSelBd = g_isDark ? 0xFF474A57u : 0xFFDCE1EAu;
+            uint32_t pillHotBg = g_isDark ? 0xFF2D2F38u : 0xFFEDF0F6u;
+            uint32_t txtSel    = g_isDark ? 0xFFF4F6FAu : 0xFF111827u;
+            uint32_t txtDim    = g_isDark ? 0xFF9BA1AEu : 0xFF6B7280u;
+
+            D2d_FillRect(&c, 0.0f, 0.0f, W, H, canvasBg);
+
+            // Measure tight track width enclosing all segments
+            float trackRight = 0.0f;
+            for (int i = 0; i < count; i++) {
+                RECT ir;
+                if (TabCtrl_GetItemRect(h, i, &ir) && (float)ir.right > trackRight)
+                    trackRight = (float)ir.right;
+            }
+            if (trackRight < 40.0f) trackRight = W;
+            trackRight += 4.0f;
+            if (trackRight > W) trackRight = W;
+
+            D2d_FillRoundedRect(&c, 0.0f, 0.0f, trackRight, H, 9.0f, 9.0f, trackBg);
+
+            for (int i = 0; i < count; i++) {
+                RECT ir;
+                if (!TabCtrl_GetItemRect(h, i, &ir)) continue;
+                float x = (float)ir.left + 2.0f;
+                float y = 3.0f;
+                float wPill = (float)(ir.right - ir.left) - 2.0f;
+                float hPill = H - 6.0f;
+                if (wPill < 8.0f || hPill < 8.0f) continue;
+
+                BOOL isSel = (i == sel);
+                BOOL isHot = (i == hot);
+                if (isSel) {
+                    D2d_FillRoundedRect(&c, x, y, wPill, hPill, 7.0f, 7.0f, pillSelBg);
+                    D2d_DrawRoundedRect(&c, x, y, wPill, hPill, 7.0f, 7.0f, 1.0f, pillSelBd);
+                } else if (isHot) {
+                    D2d_FillRoundedRect(&c, x, y, wPill, hPill, 7.0f, 7.0f, pillHotBg);
+                }
+
+                wchar_t txt[64] = {0};
+                TCITEMW ti;
+                ti.mask = TCIF_TEXT;
+                ti.pszText = txt;
+                ti.cchTextMax = ARRAYSIZE(txt);
+                TabCtrl_GetItem(h, i, &ti);
+
+                D2d_DrawText(&c, D2D_FONT_UI_12, txt, x + 2.0f, y, wPill - 4.0f, hPill,
+                             isSel ? txtSel : (isHot ? txtSel : txtDim), D2D_ALIGN_CENTER, FALSE);
+            }
+            D2dDc_End();
+        }
+        EndPaint(h, &ps);
+        return 0;
+    }
+    }
+    return DefSubclassProc(h, m, w, l);
+}
+
+void ModernMain_StyleTabStrip(HWND tab)
+{
+    if (!tab || !IsWindow(tab)) return;
+    TabCtrl_SetPadding(tab, MSc(16), MSc(6));
+    SetWindowSubclass(tab, SpaTabSubProc, SUBCLASS_SPA_TAB, 0);
+    InvalidateRect(tab, NULL, FALSE);
+}
+
+void ModernMain_PaintCardDC(HDC hdc, const RECT *rc, float radius, BOOL focused)
+{
+    if (!hdc || !rc) return;
+    float W = (float)(rc->right - rc->left);
+    float H = (float)(rc->bottom - rc->top);
+    if (W <= 4.0f || H <= 4.0f) return;
+
+    D2dCanvas c;
+    if (!D2dDc_Begin(hdc, rc, &c)) return;
+
+    uint32_t canvasBg  = g_isDark ? 0xFF1C1C1Fu : 0xFFF3F4F6u;
+    uint32_t cardBg    = g_isDark ? 0xFF232429u : 0xFFFFFFFFu;
+    uint32_t borderClr = focused
+        ? 0xFF0078D4u
+        : (g_isDark ? 0xFF333640u : 0xFFE2E6ECu);
+    float stroke = focused ? 1.5f : 1.0f;
+
+    D2d_FillRect(&c, 0.0f, 0.0f, W, H, canvasBg);
+    D2d_FillRoundedRect(&c, 0.5f, 0.5f, W - 1.0f, H - 1.0f, radius, radius, cardBg);
+    D2d_DrawRoundedRect(&c, 0.5f, 0.5f, W - 1.0f, H - 1.0f, radius, radius, stroke, borderClr);
+    D2dDc_End();
+}
+
+void ModernMain_PaintMenuPillDC(HDC hdc, const RECT *rc, BOOL hot, BOOL dimmed)
+{
+    (void)dimmed;
+    if (!hdc || !rc) return;
+    float W = (float)(rc->right - rc->left);
+    float H = (float)(rc->bottom - rc->top);
+    if (W <= 2.0f || H <= 2.0f) return;
+
+    D2dCanvas c;
+    if (!D2dDc_Begin(hdc, rc, &c)) return;
+
+    uint32_t barBg  = g_isDark ? 0xFF202024u : 0xFFF3F4F6u;
+    uint32_t pillBg = g_isDark ? 0xFF32343Cu : 0xFFE3E7EEu;
+
+    D2d_FillRect(&c, 0.0f, 0.0f, W, H, barBg);
+    if (hot && W > 8.0f && H > 8.0f) {
+        D2d_FillRoundedRect(&c, 2.0f, 3.0f, W - 4.0f, H - 6.0f, 6.0f, 6.0f, pillBg);
+    }
+    D2dDc_End();
+}
+
+void ModernMain_PaintActiveBodyCards(HDC hdc, const RECT *tab2SearchCard, BOOL searchVisible,
+                                     BOOL searchFocused, const RECT *tab2LogCard)
+{
+    if (!hdc) return;
+    if (g_curTab == MODERN_MAIN_TAB_APPS) {
+        ModernMain_PaintCardDC(hdc, &g_rcAppsCard, 10.0f, FALSE);
+    } else if (g_curTab == MODERN_MAIN_TAB_RULES) {
+        ModernMain_PaintCardDC(hdc, &g_rcRulesCard, 10.0f, FALSE);
+    } else if (g_curTab == MODERN_MAIN_TAB_LOGS) {
+        if (searchVisible && tab2SearchCard) {
+            ModernMain_PaintCardDC(hdc, tab2SearchCard, 8.0f, searchFocused);
+        }
+        if (tab2LogCard) {
+            ModernMain_PaintCardDC(hdc, tab2LogCard, 10.0f, FALSE);
+        }
+    }
 }
 
 static BOOL WildcardMatchW(const wchar_t *pat, const wchar_t *str)

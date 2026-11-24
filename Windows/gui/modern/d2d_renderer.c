@@ -254,12 +254,14 @@ struct PB_ID2D1Factory { const PB_ID2D1FactoryVtbl *lpVtbl; };
 // Global factory & typography state
 // ============================================================================
 
-static BOOL                   g_d2dReady = FALSE;
-static BOOL                   g_comOwned = FALSE;
-static PB_ID2D1Factory       *g_d2dFactory = NULL;
-static PB_IDWriteFactory     *g_dwFactory = NULL;
-static PB_IDWriteTypography  *g_tabularTypo = NULL;
-static PB_IDWriteTextFormat  *g_fonts[D2D_FONT_COUNT];
+static BOOL                     g_d2dReady = FALSE;
+static BOOL                     g_comOwned = FALSE;
+static PB_ID2D1Factory         *g_d2dFactory = NULL;
+static PB_IDWriteFactory       *g_dwFactory = NULL;
+static PB_IDWriteTypography    *g_tabularTypo = NULL;
+static PB_IDWriteTextFormat    *g_fonts[D2D_FONT_COUNT];
+static PB_ID2D1DCRenderTarget  *g_sharedDcRt = NULL;
+static PB_ID2D1SolidColorBrush *g_sharedDcBrush = NULL;
 
 static D2D1_COLOR_F ArgbToD2dColor(uint32_t argb)
 {
@@ -367,6 +369,8 @@ BOOL D2d_Init(void)
 
 void D2d_Shutdown(void)
 {
+    SAFE_COM_RELEASE(g_sharedDcBrush);
+    SAFE_COM_RELEASE(g_sharedDcRt);
     for (int i = 0; i < D2D_FONT_COUNT; i++) {
         SAFE_COM_RELEASE(g_fonts[i]);
     }
@@ -689,6 +693,69 @@ BOOL D2dHwnd_EndDraw(D2dHwndSurface *s)
         return FALSE;
     }
     return SUCCEEDED(hr);
+}
+
+// ============================================================================
+// Immediate GDI HDC Direct2D helper (opaque DC bind for SPA controls & cards)
+// ============================================================================
+
+static BOOL EnsureSharedDcRt(void)
+{
+    if (g_sharedDcRt && g_sharedDcBrush) return TRUE;
+    if (!g_d2dReady && !D2d_Init()) return FALSE;
+
+    D2D1_RENDER_TARGET_PROPERTIES props;
+    ZeroMemory(&props, sizeof(props));
+    props.type                  = D2D1_RENDER_TARGET_TYPE_DEFAULT;
+    props.pixelFormat.format    = DXGI_FORMAT_B8G8R8A8_UNORM;
+    props.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+    props.dpiX                  = 96.0f;
+    props.dpiY                  = 96.0f;
+    props.usage                 = D2D1_RENDER_TARGET_USAGE_NONE;
+    props.minLevel              = D2D1_FEATURE_LEVEL_DEFAULT;
+
+    PB_ID2D1DCRenderTarget *rt = NULL;
+    HRESULT hr = g_d2dFactory->lpVtbl->CreateDCRenderTarget(g_d2dFactory, &props, &rt);
+    if (FAILED(hr) || !rt) return FALSE;
+
+    D2D1_COLOR_F white = { 1.0f, 1.0f, 1.0f, 1.0f };
+    PB_ID2D1SolidColorBrush *brush = NULL;
+    hr = rt->lpVtbl->CreateSolidColorBrush(rt, &white, NULL, &brush);
+    if (FAILED(hr) || !brush) {
+        SAFE_COM_RELEASE(rt);
+        return FALSE;
+    }
+
+    rt->lpVtbl->SetAntialiasMode(rt, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    rt->lpVtbl->SetTextAntialiasMode(rt, D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
+    g_sharedDcRt    = rt;
+    g_sharedDcBrush = brush;
+    return TRUE;
+}
+
+BOOL D2dDc_Begin(HDC hdc, const RECT *rc, D2dCanvas *outCanvas)
+{
+    if (!hdc || !rc || !outCanvas) return FALSE;
+    if ((rc->right - rc->left) <= 0 || (rc->bottom - rc->top) <= 0) return FALSE;
+    if (!EnsureSharedDcRt()) return FALSE;
+
+    if (FAILED(g_sharedDcRt->lpVtbl->BindDC(g_sharedDcRt, hdc, rc))) return FALSE;
+    g_sharedDcRt->lpVtbl->BeginDraw(g_sharedDcRt);
+    D2D1_MATRIX_3X2_F ident = { 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f };
+    g_sharedDcRt->lpVtbl->SetTransform(g_sharedDcRt, &ident);
+    outCanvas->rt    = g_sharedDcRt;
+    outCanvas->brush = g_sharedDcBrush;
+    return TRUE;
+}
+
+void D2dDc_End(void)
+{
+    if (!g_sharedDcRt) return;
+    HRESULT hr = g_sharedDcRt->lpVtbl->EndDraw(g_sharedDcRt, NULL, NULL);
+    if (hr == (HRESULT)D2DERR_RECREATE_TARGET) {
+        SAFE_COM_RELEASE(g_sharedDcBrush);
+        SAFE_COM_RELEASE(g_sharedDcRt);
+    }
 }
 
 // ============================================================================
