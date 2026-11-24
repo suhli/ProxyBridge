@@ -73,6 +73,7 @@ BOOL D2dHwnd_BeginDraw(D2dHwndSurface *s);
 BOOL D2dHwnd_EndDraw(D2dHwndSurface *s);
 
 // Drawing primitives (shared by layered & HWND surfaces)
+void  D2d_SetScale(D2dCanvas *c, float scale);
 void  D2d_Clear(D2dCanvas *c, uint32_t argb);
 void  D2d_FillRect(D2dCanvas *c, float x, float y, float w, float h, uint32_t argb);
 void  D2d_FillRoundedRect(D2dCanvas *c, float x, float y, float w, float h, float rx, float ry, uint32_t argb);

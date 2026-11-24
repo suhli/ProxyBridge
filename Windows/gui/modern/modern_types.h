@@ -63,8 +63,14 @@ extern "C" {
 #define MODERN_CAPSULE_RADIUS           16
 #define MODERN_CAPSULE_SNAP_PX          16
 #define MODERN_OSD_HEIGHT               22
-#define MODERN_OSD_DEFAULT_OFFSET_X     12
-#define MODERN_OSD_DEFAULT_OFFSET_Y     10
+#define MODERN_OSD_DEFAULT_OFFSET_X     0
+#define MODERN_OSD_DEFAULT_OFFSET_Y     4
+#define MODERN_OSD_DEFAULT_OPACITY      90
+#define MODERN_OSD_MIN_OPACITY          30
+#define MODERN_OSD_MAX_OPACITY          100
+#define MODERN_OSD_DEFAULT_SCALE_PCT    100
+#define MODERN_OSD_MIN_SCALE_PCT        75
+#define MODERN_OSD_MAX_SCALE_PCT        150
 #define MODERN_POS_UNSET                INT_MIN
 
 // Data limits
@@ -78,6 +84,16 @@ typedef enum {
     MODERN_THEME_LIGHT  = 2
 } ModernThemeMode;
 
+typedef enum {
+    MODERN_OSD_ANCHOR_OUTSIDE_TOP_LEFT     = 0, // Default: outside above window top-left
+    MODERN_OSD_ANCHOR_OUTSIDE_TOP_RIGHT    = 1, // Outside above window top-right
+    MODERN_OSD_ANCHOR_INSIDE_TOP_LEFT      = 2, // Inside client top-left
+    MODERN_OSD_ANCHOR_INSIDE_TOP_RIGHT     = 3, // Inside client top-right
+    MODERN_OSD_ANCHOR_INSIDE_BOTTOM_LEFT   = 4, // Inside client bottom-left
+    MODERN_OSD_ANCHOR_INSIDE_BOTTOM_RIGHT  = 5, // Inside client bottom-right
+    MODERN_OSD_ANCHOR_COUNT                = 6
+} ModernOsdAnchor;
+
 typedef struct {
     int  themeMode;         // ModernThemeMode (0 = follow system, 1 = dark, 2 = light)
     BOOL capsuleEnabled;    // Desktop floating capsule visible
@@ -87,8 +103,11 @@ typedef struct {
     BOOL osdEnabled;        // Master switch for top-left dual-mode OSD
     BOOL osdCompactMode;    // FALSE = standard, TRUE = compact template
     BOOL rtssEnabled;       // Enable Channel A (RTSS SharedMemoryV2) when hooked
-    int  osdOffsetX;        // Channel B client-area X offset (default +12px)
-    int  osdOffsetY;        // Channel B client-area Y offset (default +10px)
+    int  osdAnchor;         // ModernOsdAnchor (default: OUTSIDE_TOP_LEFT)
+    int  osdOffsetX;        // Fine-tune X offset in px (default 0)
+    int  osdOffsetY;        // Gap / fine-tune Y offset in px (default 4)
+    int  osdOpacity;        // Opacity percentage 30..100 (default 90)
+    int  osdScalePct;       // Size scale percentage 75..150 (default 100)
 } ModernUiConfig;
 
 typedef struct {
@@ -136,8 +155,26 @@ static __inline void ModernUiConfig_Defaults(ModernUiConfig *cfg)
     cfg->osdEnabled     = TRUE;
     cfg->osdCompactMode = FALSE;
     cfg->rtssEnabled    = TRUE;
+    cfg->osdAnchor      = MODERN_OSD_ANCHOR_OUTSIDE_TOP_LEFT;
     cfg->osdOffsetX     = MODERN_OSD_DEFAULT_OFFSET_X;
     cfg->osdOffsetY     = MODERN_OSD_DEFAULT_OFFSET_Y;
+    cfg->osdOpacity     = MODERN_OSD_DEFAULT_OPACITY;
+    cfg->osdScalePct    = MODERN_OSD_DEFAULT_SCALE_PCT;
+}
+
+static __inline void ModernUiConfig_Sanitize(ModernUiConfig *cfg)
+{
+    if (!cfg) return;
+    if (cfg->themeMode < 0 || cfg->themeMode > MODERN_THEME_LIGHT) cfg->themeMode = MODERN_THEME_SYSTEM;
+    if (cfg->osdAnchor < 0 || cfg->osdAnchor >= MODERN_OSD_ANCHOR_COUNT) cfg->osdAnchor = MODERN_OSD_ANCHOR_OUTSIDE_TOP_LEFT;
+    if (cfg->osdOffsetX < -400) cfg->osdOffsetX = -400;
+    if (cfg->osdOffsetX >  400) cfg->osdOffsetX =  400;
+    if (cfg->osdOffsetY < -400) cfg->osdOffsetY = -400;
+    if (cfg->osdOffsetY >  400) cfg->osdOffsetY =  400;
+    if (cfg->osdOpacity < MODERN_OSD_MIN_OPACITY) cfg->osdOpacity = MODERN_OSD_MIN_OPACITY;
+    if (cfg->osdOpacity > MODERN_OSD_MAX_OPACITY) cfg->osdOpacity = MODERN_OSD_MAX_OPACITY;
+    if (cfg->osdScalePct < MODERN_OSD_MIN_SCALE_PCT) cfg->osdScalePct = MODERN_OSD_MIN_SCALE_PCT;
+    if (cfg->osdScalePct > MODERN_OSD_MAX_SCALE_PCT) cfg->osdScalePct = MODERN_OSD_MAX_SCALE_PCT;
 }
 
 static __inline uint32_t ModernStatusColorArgb(BOOL proxyEnabled, uint32_t rttMs)

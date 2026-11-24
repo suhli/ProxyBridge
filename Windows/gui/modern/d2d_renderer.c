@@ -198,7 +198,9 @@ struct PB_ID2D1SolidColorBrush { const PB_ID2D1SolidColorBrushVtbl *lpVtbl; };
     void   *_rtPad2[5]; /* [18..22] */ \
     void    (STDMETHODCALLTYPE *DrawText)(T*, const WCHAR*, UINT32, void*, const D2D1_RECT_F*, void*, D2D1_DRAW_TEXT_OPTIONS, DWRITE_MEASURING_MODE); /* [23] */ \
     void    (STDMETHODCALLTYPE *DrawTextLayout)(T*, D2D1_POINT_2F, void*, void*, D2D1_DRAW_TEXT_OPTIONS); /* [24] */ \
-    void   *_rtPad3[3]; /* [25..27] */ \
+    void   *_rtPad3[1]; /* [25] */ \
+    void    (STDMETHODCALLTYPE *SetTransform)(T*, const D2D1_MATRIX_3X2_F*);                      /* [26] */ \
+    void   *_rtPad3b[1]; /* [27] */ \
     void    (STDMETHODCALLTYPE *SetAntialiasMode)(T*, D2D1_ANTIALIAS_MODE);                       /* [28] */ \
     void   *_rtPad4[1]; /* [29] */ \
     void    (STDMETHODCALLTYPE *SetTextAntialiasMode)(T*, D2D1_TEXT_ANTIALIAS_MODE);              /* [30] */ \
@@ -555,6 +557,8 @@ BOOL D2dLayered_BeginDraw(D2dLayeredSurface *s)
     PB_ID2D1DCRenderTarget *rt = (PB_ID2D1DCRenderTarget *)s->dcRt;
     if (FAILED(rt->lpVtbl->BindDC(rt, s->memDC, &rc))) return FALSE;
     rt->lpVtbl->BeginDraw(rt);
+    D2D1_MATRIX_3X2_F ident = { 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f };
+    rt->lpVtbl->SetTransform(rt, &ident);
     D2D1_COLOR_F clear = { 0.0f, 0.0f, 0.0f, 0.0f };
     rt->lpVtbl->Clear(rt, &clear);
     return TRUE;
@@ -691,6 +695,15 @@ static void SetBrushColor(D2dCanvas *c, uint32_t argb)
     PB_ID2D1SolidColorBrush *b = (PB_ID2D1SolidColorBrush *)c->brush;
     D2D1_COLOR_F col = ArgbToD2dColor(argb);
     b->lpVtbl->SetColor(b, &col);
+}
+
+void D2d_SetScale(D2dCanvas *c, float scale)
+{
+    if (!c || !c->rt) return;
+    if (scale <= 0.1f) scale = 1.0f;
+    PB_ID2D1RenderTarget *rt = (PB_ID2D1RenderTarget *)c->rt;
+    D2D1_MATRIX_3X2_F m = { scale, 0.0f, 0.0f, scale, 0.0f, 0.0f };
+    rt->lpVtbl->SetTransform(rt, &m);
 }
 
 void D2d_Clear(D2dCanvas *c, uint32_t argb)

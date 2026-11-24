@@ -7,6 +7,7 @@
 
 #include "window_osd.h"
 #include "d2d_renderer.h"
+#include <dwmapi.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -20,11 +21,12 @@ static HWND                        g_osdHwnd = NULL;
 static D2dLayeredSurface           g_osdSurf;
 static BOOL                        g_osdVisible = FALSE;
 static HWND                        g_targetHwnd = NULL;
+static int                         g_anchor = MODERN_OSD_ANCHOR_OUTSIDE_TOP_LEFT;
 static int                         g_offsetX = MODERN_OSD_DEFAULT_OFFSET_X;
 static int                         g_offsetY = MODERN_OSD_DEFAULT_OFFSET_Y;
 static int                         g_lastX = 0;
 static int                         g_lastY = 0;
-static int                         g_lastW = 0;
+static int                         g_lastW = 220;
 static int                         g_lastH = MODERN_OSD_HEIGHT;
 
 static HWINEVENTHOOK               g_hookFg = NULL;
@@ -33,21 +35,81 @@ static HWINEVENTHOOK               g_hookLoc = NULL;
 static WindowOsdForegroundCallback g_fgCb = NULL;
 static void                       *g_fgUser = NULL;
 
-static BOOL ComputeTargetAnchor(HWND target, int offX, int offY, int *outX, int *outY)
+static BOOL GetVisibleFrameRect(HWND target, RECT *outRect)
+{
+    if (SUCCEEDED(DwmGetWindowAttribute(target, DWMWA_EXTENDED_FRAME_BOUNDS, outRect, sizeof(*outRect)))) {
+        if ((outRect->right - outRect->left) > 0 && (outRect->bottom - outRect->top) > 0)
+            return TRUE;
+    }
+    return GetWindowRect(target, outRect);
+}
+
+static BOOL ComputeTargetAnchor(HWND target, int anchor, int offX, int offY, int pillW, int pillH, int *outX, int *outY)
 {
     if (!target || !IsWindow(target) || !IsWindowVisible(target) || IsIconic(target))
         return FALSE;
 
-    RECT rcClient;
-    if (!GetClientRect(target, &rcClient)) return FALSE;
-    if ((rcClient.right - rcClient.left) < 40 || (rcClient.bottom - rcClient.top) < 24)
+    RECT frame;
+    if (!GetVisibleFrameRect(target, &frame)) return FALSE;
+    if ((frame.right - frame.left) < 40 || (frame.bottom - frame.top) < 24)
         return FALSE;
 
-    POINT pt = { 0, 0 };
-    if (!ClientToScreen(target, &pt)) return FALSE;
+    RECT clientRc = { 0, 0, 0, 0 };
+    POINT clientOrigin = { frame.left, frame.top };
+    if (GetClientRect(target, &clientRc) && ClientToScreen(target, &clientOrigin)) {
+        // valid client geometry
+    } else {
+        clientRc.right  = frame.right - frame.left;
+        clientRc.bottom = frame.bottom - frame.top;
+    }
 
-    *outX = pt.x + offX;
-    *outY = pt.y + offY;
+    int x = frame.left;
+    int y = frame.top;
+
+    switch (anchor) {
+    case MODERN_OSD_ANCHOR_OUTSIDE_TOP_RIGHT:
+        x = frame.right - pillW - offX;
+        y = frame.top - pillH - offY;
+        break;
+    case MODERN_OSD_ANCHOR_INSIDE_TOP_LEFT:
+        x = clientOrigin.x + offX;
+        y = clientOrigin.y + offY;
+        break;
+    case MODERN_OSD_ANCHOR_INSIDE_TOP_RIGHT:
+        x = clientOrigin.x + (clientRc.right - clientRc.left) - pillW - offX;
+        y = clientOrigin.y + offY;
+        break;
+    case MODERN_OSD_ANCHOR_INSIDE_BOTTOM_LEFT:
+        x = clientOrigin.x + offX;
+        y = clientOrigin.y + (clientRc.bottom - clientRc.top) - pillH - offY;
+        break;
+    case MODERN_OSD_ANCHOR_INSIDE_BOTTOM_RIGHT:
+        x = clientOrigin.x + (clientRc.right - clientRc.left) - pillW - offX;
+        y = clientOrigin.y + (clientRc.bottom - clientRc.top) - pillH - offY;
+        break;
+    case MODERN_OSD_ANCHOR_OUTSIDE_TOP_LEFT:
+    default:
+        x = frame.left + offX;
+        y = frame.top - pillH - offY;
+        break;
+    }
+
+    // Clamp cleanly inside target window's monitor so maximized or top-edge windows
+    // never push the capsule off-screen.
+    HMONITOR mon = MonitorFromWindow(target, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi;
+    ZeroMemory(&mi, sizeof(mi));
+    mi.cbSize = sizeof(mi);
+    if (GetMonitorInfoW(mon, &mi)) {
+        const RECT *mr = &mi.rcMonitor;
+        if (x < mr->left + 2)          x = mr->left + 2;
+        if (x + pillW > mr->right - 2) x = mr->right - pillW - 2;
+        if (y < mr->top + 2)           y = mr->top + 2;
+        if (y + pillH > mr->bottom - 2) y = mr->bottom - pillH - 2;
+    }
+
+    *outX = x;
+    *outY = y;
     return TRUE;
 }
 
@@ -92,7 +154,7 @@ static void CALLBACK OsdWinEventProc(HWINEVENTHOOK hook, DWORD event, HWND hwnd,
         if (idObject != OBJID_WINDOW || hwnd != g_targetHwnd || !g_osdVisible || !g_osdHwnd)
             return;
         int x = 0, y = 0;
-        if (!ComputeTargetAnchor(g_targetHwnd, g_offsetX, g_offsetY, &x, &y) ||
+        if (!ComputeTargetAnchor(g_targetHwnd, g_anchor, g_offsetX, g_offsetY, g_lastW, g_lastH, &x, &y) ||
             GetForegroundWindow() != g_targetHwnd) {
             WindowOsd_Hide();
             return;
@@ -209,14 +271,12 @@ void WindowOsd_Update(HWND targetHwnd, const ModernAppTraffic *app, BOOL proxyEn
         return;
     }
 
-    g_offsetX = cfg->osdOffsetX;
-    g_offsetY = cfg->osdOffsetY;
+    ModernUiConfig safeCfg = *cfg;
+    ModernUiConfig_Sanitize(&safeCfg);
 
-    int anchorX = 0, anchorY = 0;
-    if (!ComputeTargetAnchor(targetHwnd, g_offsetX, g_offsetY, &anchorX, &anchorY)) {
-        WindowOsd_Hide();
-        return;
-    }
+    g_anchor  = safeCfg.osdAnchor;
+    g_offsetX = safeCfg.osdOffsetX;
+    g_offsetY = safeCfg.osdOffsetY;
 
     // Format telemetry segments with tabular figures
     wchar_t rttStr[24], dnStr[32], upStr[32], sumStr[32];
@@ -230,11 +290,11 @@ void WindowOsd_Update(HWND targetHwnd, const ModernAppTraffic *app, BOOL proxyEn
         lstrcpynW(rttStr, L"--ms", ARRAYSIZE(rttStr));
     }
 
-    ModernFormatSpeedW(app->rxBytesPerSec, cfg->osdCompactMode, dnStr, ARRAYSIZE(dnStr));
-    ModernFormatSpeedW(app->txBytesPerSec, cfg->osdCompactMode, upStr, ARRAYSIZE(upStr));
+    ModernFormatSpeedW(app->rxBytesPerSec, safeCfg.osdCompactMode, dnStr, ARRAYSIZE(dnStr));
+    ModernFormatSpeedW(app->txBytesPerSec, safeCfg.osdCompactMode, upStr, ARRAYSIZE(upStr));
     ModernFormatBytesW(app->rxBytesTotal + app->txBytesTotal, sumStr, ARRAYSIZE(sumStr));
 
-    if (cfg->osdCompactMode) {
+    if (safeCfg.osdCompactMode) {
         _snwprintf_s(dnSeg, ARRAYSIZE(dnSeg), _TRUNCATE, L"\x2193%s", dnStr);
         _snwprintf_s(upSeg, ARRAYSIZE(upSeg), _TRUNCATE, L"\x2191%s", upStr);
         sumSeg[0] = L'\0';
@@ -244,39 +304,51 @@ void WindowOsd_Update(HWND targetHwnd, const ModernAppTraffic *app, BOOL proxyEn
         _snwprintf_s(sumSeg, ARRAYSIZE(sumSeg), _TRUNCATE, L"\x03A3 %s", sumStr);
     }
 
-    // Measure stable segment widths (minimum widths avoid pill horizontal jitter)
+    // Measure stable segment widths in DIPs (minimum widths avoid pill horizontal jitter)
     const D2dFontSlot font = D2D_FONT_MONO_11;
     float wRtt = D2d_MeasureTextWidth(font, rttStr, TRUE);
     float wDn  = D2d_MeasureTextWidth(font, dnSeg, TRUE);
     float wUp  = D2d_MeasureTextWidth(font, upSeg, TRUE);
-    float wSum = cfg->osdCompactMode ? 0.0f : D2d_MeasureTextWidth(font, sumSeg, TRUE);
-    float wSep = cfg->osdCompactMode ? 0.0f : D2d_MeasureTextWidth(font, L"|", TRUE);
+    float wSum = safeCfg.osdCompactMode ? 0.0f : D2d_MeasureTextWidth(font, sumSeg, TRUE);
+    float wSep = safeCfg.osdCompactMode ? 0.0f : D2d_MeasureTextWidth(font, L"|", TRUE);
 
     if (wRtt < 34.0f) wRtt = 34.0f;
-    if (wDn  < (cfg->osdCompactMode ? 58.0f : 72.0f)) wDn = cfg->osdCompactMode ? 58.0f : 72.0f;
-    if (wUp  < (cfg->osdCompactMode ? 58.0f : 72.0f)) wUp = cfg->osdCompactMode ? 58.0f : 72.0f;
-    if (!cfg->osdCompactMode && wSum < 62.0f) wSum = 62.0f;
+    if (wDn  < (safeCfg.osdCompactMode ? 58.0f : 72.0f)) wDn = safeCfg.osdCompactMode ? 58.0f : 72.0f;
+    if (wUp  < (safeCfg.osdCompactMode ? 58.0f : 72.0f)) wUp = safeCfg.osdCompactMode ? 58.0f : 72.0f;
+    if (!safeCfg.osdCompactMode && wSum < 62.0f) wSum = 62.0f;
 
     float padL = 9.0f;
     float dotD = 7.0f;
-    float gap  = cfg->osdCompactMode ? 7.0f : 8.0f;
+    float gap  = safeCfg.osdCompactMode ? 7.0f : 8.0f;
     float padR = 10.0f;
 
     float totalW = padL + dotD + 6.0f + wRtt;
-    if (cfg->osdCompactMode) {
+    if (safeCfg.osdCompactMode) {
         totalW += gap + wDn + gap + wUp + padR;
     } else {
         totalW += gap + wSep + gap + wDn + gap + wUp + gap + wSep + gap + wSum + padR;
     }
 
-    int pillW = (int)ceilf(totalW);
-    if (pillW < 140) pillW = 140;
-    if (pillW > 520) pillW = 520;
-    int pillH = MODERN_OSD_HEIGHT;
+    float baseW = ceilf(totalW);
+    if (baseW < 140.0f) baseW = 140.0f;
+    if (baseW > 520.0f) baseW = 520.0f;
+    float baseH = (float)MODERN_OSD_HEIGHT;
+
+    float scale = (float)safeCfg.osdScalePct / 100.0f;
+    int pillW = (int)ceilf(baseW * scale);
+    int pillH = (int)ceilf(baseH * scale);
+    if (pillW < 100) pillW = 100;
+    if (pillH < 16)  pillH = 16;
+
+    int anchorX = 0, anchorY = 0;
+    if (!ComputeTargetAnchor(targetHwnd, g_anchor, g_offsetX, g_offsetY, pillW, pillH, &anchorX, &anchorY)) {
+        WindowOsd_Hide();
+        return;
+    }
 
     if (!D2dLayered_Resize(&g_osdSurf, pillW, pillH)) return;
 
-    BOOL dark = D2d_ResolveDarkMode(cfg->themeMode);
+    BOOL dark = D2d_ResolveDarkMode(safeCfg.themeMode);
     uint32_t bgArgb     = dark ? MODERN_COLOR_BG_DARK_ARGB     : MODERN_COLOR_BG_LIGHT_ARGB;
     uint32_t borderArgb = dark ? MODERN_COLOR_BORDER_DARK_ARGB : MODERN_COLOR_BORDER_LIGHT_ARGB;
     uint32_t textArgb   = dark ? MODERN_COLOR_TEXT_DARK_ARGB   : MODERN_COLOR_TEXT_LIGHT_ARGB;
@@ -284,9 +356,10 @@ void WindowOsd_Update(HWND targetHwnd, const ModernAppTraffic *app, BOOL proxyEn
     uint32_t dotArgb    = ModernStatusColorArgb(proxyEnabled, app->rttMs);
 
     if (!D2dLayered_BeginDraw(&g_osdSurf)) return;
+    D2d_SetScale(&g_osdSurf.canvas, scale);
 
-    float fw = (float)pillW;
-    float fh = (float)pillH;
+    float fw = baseW;
+    float fh = baseH;
     float rad = fh * 0.5f;
 
     // Pill background + 1px crisp inner stroke
@@ -302,7 +375,7 @@ void WindowOsd_Update(HWND targetHwnd, const ModernAppTraffic *app, BOOL proxyEn
     D2d_DrawText(&g_osdSurf.canvas, font, rttStr, x, 0.0f, wRtt + 2.0f, fh, textArgb, D2D_ALIGN_LEFT, TRUE);
     x += wRtt + gap;
 
-    if (!cfg->osdCompactMode) {
+    if (!safeCfg.osdCompactMode) {
         D2d_DrawText(&g_osdSurf.canvas, font, L"|", x, 0.0f, wSep + 2.0f, fh, mutedArgb, D2D_ALIGN_CENTER, FALSE);
         x += wSep + gap;
     }
@@ -313,13 +386,14 @@ void WindowOsd_Update(HWND targetHwnd, const ModernAppTraffic *app, BOOL proxyEn
     D2d_DrawText(&g_osdSurf.canvas, font, upSeg, x, 0.0f, wUp + 2.0f, fh, MODERN_COLOR_UL_ARGB, D2D_ALIGN_LEFT, TRUE);
     x += wUp + gap;
 
-    if (!cfg->osdCompactMode) {
+    if (!safeCfg.osdCompactMode) {
         D2d_DrawText(&g_osdSurf.canvas, font, L"|", x, 0.0f, wSep + 2.0f, fh, mutedArgb, D2D_ALIGN_CENTER, FALSE);
         x += wSep + gap;
         D2d_DrawText(&g_osdSurf.canvas, font, sumSeg, x, 0.0f, wSum + 4.0f, fh, textArgb, D2D_ALIGN_LEFT, TRUE);
     }
 
-    if (D2dLayered_EndDrawAndPresent(&g_osdSurf, g_osdHwnd, anchorX, anchorY, 255)) {
+    BYTE masterAlpha = (BYTE)((safeCfg.osdOpacity * 255 + 50) / 100);
+    if (D2dLayered_EndDrawAndPresent(&g_osdSurf, g_osdHwnd, anchorX, anchorY, masterAlpha)) {
         g_targetHwnd = targetHwnd;
         g_lastX = anchorX;
         g_lastY = anchorY;
