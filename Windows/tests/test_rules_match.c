@@ -147,14 +147,14 @@ int main(void)
 
     {
         const PB_APPLICATION_RULE rules[] = {
-            {0, RULE_ACTION_DIRECT, "engine.exe"},
-            {7, RULE_ACTION_BLOCK, "*"},
-            {8, RULE_ACTION_DIRECT, "browser.exe"},
+            {0, RULE_ACTION_DIRECT, "engine.exe", "*", "*", "*", RULE_PROTOCOL_BOTH},
+            {7, RULE_ACTION_BLOCK, "*", "*", "*", "*", RULE_PROTOCOL_BOTH},
+            {8, RULE_ACTION_DIRECT, "browser.exe", "*", "*", "*", RULE_PROTOCOL_BOTH},
         };
         CHECK(ProxyBridge_ReplaceApplicationRules(rules, 3));
         CHECK(m4("engine.exe", "8.8.8.8", 443) == RULE_ACTION_DIRECT);
         CHECK(m4("browser.exe", "8.8.8.8", 443) == RULE_ACTION_BLOCK && g_tl_rule_id == 7);
-        const PB_APPLICATION_RULE invalid[] = {{7, RULE_ACTION_PROXY, ""}};
+        const PB_APPLICATION_RULE invalid[] = {{7, RULE_ACTION_PROXY, "", "*", "*", "*", RULE_PROTOCOL_BOTH}};
         CHECK(!ProxyBridge_ReplaceApplicationRules(invalid, 1));
         CHECK(m4("browser.exe", "8.8.8.8", 443) == RULE_ACTION_BLOCK);
         application_connected(7, 12);

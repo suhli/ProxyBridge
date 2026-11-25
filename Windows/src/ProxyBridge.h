@@ -67,6 +67,10 @@ typedef struct {
     UINT32 id;
     RuleAction action;
     const char *process;
+    const char *target_hosts;
+    const char *target_ports;
+    const char *target_domains;
+    RuleProtocol protocol;
 } PB_APPLICATION_RULE;
 
 typedef struct {

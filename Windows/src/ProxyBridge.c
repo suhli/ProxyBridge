@@ -229,6 +229,13 @@ static BOOL is_local_proxy_port(UINT16 port_host)
     return FALSE;
 }
 
+static BOOL is_private_lan_v4(UINT32 ip_net)
+{
+    BYTE b0 = (BYTE)(ip_net & 0xFF);
+    BYTE b1 = (BYTE)((ip_net >> 8) & 0xFF);
+    return b0 == 10 || (b0 == 172 && b1 >= 16 && b1 <= 31) || (b0 == 192 && b1 == 168);
+}
+
 static BOOL is_local_host_v4(UINT32 ip_net, BOOL is_loopback)
 {
     if (is_loopback || (ip_net & 0xFF) == 127)
@@ -858,6 +865,11 @@ DWORD WINAPI packet_processor(LPVOID arg)
                     if (action == RULE_ACTION_PROXY && (dest_port == 67 || dest_port == 68))
                         action = RULE_ACTION_DIRECT;
 
+                    // Private LAN DNS servers are unreachable from remote proxies and must go direct
+                    // so DNS resolves locally and populates the DNS snoop cache for domain forwarding.
+                    if (action == RULE_ACTION_PROXY && dest_port == 53 && is_private_lan_v4(dest_ip))
+                        action = RULE_ACTION_DIRECT;
+
                     // only log if callback is set
                     // reuse pid from check_process_rule
                     // CLI use no log flag
@@ -1426,8 +1438,7 @@ PROXYBRIDGE_API BOOL ProxyBridge_Start(void)
 
     relay_pool_start();   // optional: connections fall back to blocking relay threads without it
 
-    if (!g_application_mode)
-        g_fw_thread = CreateThread(NULL, 0, fw_ensure_thread, NULL, 0, NULL);
+    g_fw_thread = CreateThread(NULL, 0, fw_ensure_thread, NULL, 0, NULL);
 
     proxy_thread = CreateThread(NULL, 1, local_proxy_server, NULL, 0, NULL);
     if (proxy_thread == NULL)

@@ -992,23 +992,27 @@ PROXYBRIDGE_API BOOL ProxyBridge_ReplaceApplicationRules(const PB_APPLICATION_RU
     if (count && rules == NULL) return FALSE;
     PROCESS_RULE *next = NULL;
     PROCESS_RULE **tail = &next;
+    BOOL has_domain = FALSE;
     for (UINT32 i = 0; i < count; i++)
     {
         const PB_APPLICATION_RULE *input = &rules[i];
         if (input->id > PB_APPLICATION_RULE_MAX_ID || input->action > RULE_ACTION_BLOCK ||
+            input->protocol > RULE_PROTOCOL_BOTH ||
             (input->id == 0 && (i != 0 || input->action != RULE_ACTION_DIRECT)))
         {
             free_rule_list(next);
             return FALSE;
         }
-        PROCESS_RULE *rule = make_rule(input->process, NULL, NULL, NULL,
-                                      RULE_PROTOCOL_BOTH, input->action, 0, FALSE);
+        PROCESS_RULE *rule = make_rule(input->process, input->target_hosts, input->target_ports,
+                                      input->target_domains, input->protocol, input->action, 0, FALSE);
         if (rule == NULL)
         {
             free_rule_list(next);
             return FALSE;
         }
         rule->rule_id = input->id;
+        if (rule_has_domain_filter(rule))
+            has_domain = TRUE;
         *tail = rule;
         tail = &rule->next;
     }
@@ -1017,7 +1021,7 @@ PROXYBRIDGE_API BOOL ProxyBridge_ReplaceApplicationRules(const PB_APPLICATION_RU
     PROCESS_RULE *old = rules_list;
     rules_list = next;
     g_application_mode = TRUE;
-    g_has_domain_rules = FALSE;
+    g_has_domain_rules = has_domain;
     g_has_active_rules = next != NULL;
     ReleaseSRWLockExclusive(&g_rules_lock);
     free_rule_list(old);
