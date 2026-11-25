@@ -12,7 +12,7 @@ extern "C" {
 
 typedef BOOL (*StatsFetchSnapshotFn)(PidStatsSnapshot *out);
 typedef void (*StatsUpdateCallback)(const ModernStatsView *view, void *user);
-typedef void (*StatsRuleResolverFn)(const wchar_t *appName, wchar_t *ruleOut, size_t ruleCch, void *user);
+typedef BOOL (*StatsRuleResolverFn)(const wchar_t *appName, wchar_t *ruleOut, size_t ruleCch, void *user);
 
 void StatsManager_Init(void);
 void StatsManager_Shutdown(void);
@@ -21,6 +21,7 @@ void StatsManager_Reset(void);
 BOOL StatsManager_AddListener(StatsUpdateCallback cb, void *user);
 void StatsManager_RemoveListener(StatsUpdateCallback cb, void *user);
 void StatsManager_SetRuleResolver(StatsRuleResolverFn fn, void *user);
+BOOL StatsManager_IsAppInProxyRules(const wchar_t *appName, wchar_t *ruleOut, size_t ruleCch);
 
 // Polls PidStatsSnapshot once (called on 1000ms timer), aggregates process trees,
 // updates rates/totals/history, and notifies all registered listeners.

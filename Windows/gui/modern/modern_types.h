@@ -129,6 +129,7 @@ typedef struct {
     uint32_t activeConns;       // Current active proxied TCP connections
     uint32_t treePidCount;      // Number of raw PIDs aggregated into this host
     BOOL     isForeground;      // TRUE if this hostPid owns the foreground window
+    BOOL     inProxyRules;      // TRUE if appName matches an enabled PROXY rule
 } ModernAppTraffic;
 
 typedef struct {

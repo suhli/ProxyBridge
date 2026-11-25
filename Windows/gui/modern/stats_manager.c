@@ -484,6 +484,15 @@ void StatsManager_SetRuleResolver(StatsRuleResolverFn fn, void *user)
     g_ruleResolverUser = user;
 }
 
+BOOL StatsManager_IsAppInProxyRules(const wchar_t *appName, wchar_t *ruleOut, size_t ruleCch)
+{
+    if (g_ruleResolver) {
+        return g_ruleResolver(appName, ruleOut, ruleCch, g_ruleResolverUser);
+    }
+    if (ruleOut && ruleCch > 0) lstrcpynW(ruleOut, L"Proxy", (int)ruleCch);
+    return TRUE;
+}
+
 const ModernStatsView *StatsManager_GetLatest(void)
 {
     return &g_latestView;
@@ -608,11 +617,7 @@ void StatsManager_Tick(StatsFetchSnapshotFn fetchFn, BOOL proxyEnabled)
                 a->txBytesTotal = accum->txTotal;
                 a->rttMs        = accum->lastRttMs;
                 a->isForeground = (fgPid != 0 && hostPid == fgPid);
-                if (g_ruleResolver) {
-                    g_ruleResolver(a->appName, a->ruleName, ARRAYSIZE(a->ruleName), g_ruleResolverUser);
-                } else {
-                    lstrcpynW(a->ruleName, L"Proxy", ARRAYSIZE(a->ruleName));
-                }
+                a->inProxyRules = StatsManager_IsAppInProxyRules(a->appName, a->ruleName, ARRAYSIZE(a->ruleName));
             }
             if (appIdx >= 0) {
                 ModernAppTraffic *a = &next.apps[appIdx];
@@ -654,6 +659,9 @@ void StatsManager_Tick(StatsFetchSnapshotFn fetchFn, BOOL proxyEnabled)
                     next.foregroundStats.txBytesTotal = g_hostAccum[i].txTotal;
                     next.foregroundStats.rttMs        = g_hostAccum[i].lastRttMs;
                     next.foregroundStats.isForeground = TRUE;
+                    next.foregroundStats.inProxyRules = StatsManager_IsAppInProxyRules(
+                        next.foregroundStats.appName, next.foregroundStats.ruleName,
+                        ARRAYSIZE(next.foregroundStats.ruleName));
                     break;
                 }
             }

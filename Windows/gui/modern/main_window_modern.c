@@ -790,7 +790,7 @@ static void FormatAppCell(const ModernAppTraffic *a, int col, wchar_t *out, int 
         }
         break;
     case 1:
-        lstrcpynW(out, a->ruleName[0] ? a->ruleName : L"Proxy", cch);
+        lstrcpynW(out, a->ruleName[0] ? a->ruleName : L"-", cch);
         break;
     case 2:
         ModernFormatSpeedW(a->rxBytesPerSec, FALSE, out, (size_t)cch);
@@ -1280,40 +1280,73 @@ static BOOL WildcardMatchW(const wchar_t *pat, const wchar_t *str)
     return *pat == L'\0';
 }
 
-void ModernMain_ResolveRuleForApp(const PBProfile *profile, const wchar_t *appName,
+static BOOL IsWildcardAllW(const wchar_t *s)
+{
+    if (!s) return TRUE;
+    while (*s == L' ' || *s == L'\t') s++;
+    if (*s == L'\0') return TRUE;
+    if (*s == L'*') {
+        s++;
+        while (*s == L' ' || *s == L'\t') s++;
+        return *s == L'\0';
+    }
+    return FALSE;
+}
+
+static BOOL RuleProcMatchesAppW(const wchar_t *procList, const wchar_t *appName)
+{
+    if (!procList || !appName || !appName[0]) return FALSE;
+    const wchar_t *p = procList;
+    while (*p) {
+        while (*p == L';' || *p == L',' || *p == L' ' || *p == L'\t') p++;
+        if (!*p) break;
+        const wchar_t *s = p;
+        while (*p && *p != L';' && *p != L',') p++;
+        const wchar_t *e = p;
+        while (e > s && (e[-1] == L' ' || e[-1] == L'\t')) e--;
+        if (e - s >= 2 && *s == L'"' && e[-1] == L'"') { s++; e--; }
+        size_t len = (size_t)(e - s);
+        if (len > 0 && len < 256) {
+            wchar_t tok[256];
+            memcpy(tok, s, len * sizeof(wchar_t));
+            tok[len] = L'\0';
+            // Match basename when rule specifies a full path
+            const wchar_t *baseTok = wcsrchr(tok, L'\\');
+            const wchar_t *slashTok = wcsrchr(tok, L'/');
+            if (slashTok && (!baseTok || slashTok > baseTok)) baseTok = slashTok;
+            baseTok = baseTok ? (baseTok + 1) : tok;
+            if (WildcardMatchW(baseTok, appName)) {
+                return TRUE;
+            }
+        }
+    }
+    return FALSE;
+}
+
+BOOL ModernMain_ResolveRuleForApp(const PBProfile *profile, const wchar_t *appName,
                                   wchar_t *ruleOut, size_t ruleCch)
 {
-    if (!ruleOut || ruleCch == 0) return;
-    lstrcpynW(ruleOut, L"Proxy", (int)ruleCch);
-    if (!profile || !appName || !appName[0]) return;
+    if (ruleOut && ruleCch > 0) ruleOut[0] = L'\0';
+    if (!profile || !appName || !appName[0]) return FALSE;
 
     for (int i = 0; i < profile->ruleCount; i++) {
         const PBRule *r = &profile->rule[i];
         if (!r->enabled) continue;
-        if (_wcsicmp(r->action, L"PROXY") != 0) continue;
+        if (!RuleProcMatchesAppW(r->proc, appName)) continue;
 
-        // Check semicolon-separated process patterns
-        const wchar_t *p = r->proc;
-        while (*p) {
-            while (*p == L';' || *p == L',' || *p == L' ') p++;
-            if (!*p) break;
-            const wchar_t *s = p;
-            while (*p && *p != L';' && *p != L',') p++;
-            const wchar_t *e = p;
-            while (e > s && e[-1] == L' ') e--;
-            size_t len = (size_t)(e - s);
-            if (len > 0 && len < 128) {
-                wchar_t tok[128];
-                memcpy(tok, s, len * sizeof(wchar_t));
-                tok[len] = L'\0';
-                // Strip directory prefix if pattern has a backslash
-                const wchar_t *baseTok = wcsrchr(tok, L'\\');
-                baseTok = baseTok ? (baseTok + 1) : tok;
-                if (WildcardMatchW(baseTok, appName)) {
-                    lstrcpynW(ruleOut, r->name[0] ? r->name : tok, (int)ruleCch);
-                    return;
-                }
+        if (_wcsicmp(r->action, L"PROXY") == 0) {
+            if (ruleOut && ruleCch > 0) {
+                lstrcpynW(ruleOut, r->name[0] ? r->name : L"Proxy", (int)ruleCch);
             }
+            return TRUE;
+        }
+
+        // Earlier enabled DIRECT/BLOCK rule that catches all hosts/ports/protos
+        // overrides any later wildcard PROXY rule for this app.
+        BOOL allProto = (!r->proto[0] || _wcsicmp(r->proto, L"BOTH") == 0);
+        if (allProto && IsWildcardAllW(r->hosts) && IsWildcardAllW(r->ports)) {
+            return FALSE;
         }
     }
+    return FALSE;
 }

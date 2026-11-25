@@ -445,10 +445,10 @@ static void SyncModernToProfile(void)
     g_profile.osdTextColor     = g_modernCfg.osdTextColor & 0x00FFFFFFu;
 }
 
-static void MainRuleResolver(const wchar_t* appName, wchar_t* ruleOut, size_t ruleCch, void* user)
+static BOOL MainRuleResolver(const wchar_t* appName, wchar_t* ruleOut, size_t ruleCch, void* user)
 {
     (void)user;
-    ModernMain_ResolveRuleForApp(&g_profile, appName, ruleOut, ruleCch);
+    return ModernMain_ResolveRuleForApp(&g_profile, appName, ruleOut, ruleCch);
 }
 
 static void ApplyModernThemeAll(HWND hwnd)
@@ -552,7 +552,7 @@ static void OnModernMainAction(ModernMainAction action, int param, void* user)
         if (DialogBoxParamW(g_hInst, MAKEINTRESOURCEW(IDD_RULE), g_hMain, RuleEditDlgProc, (LPARAM)&r) == 1)
         {
             UINT32 id = EngineAddRule(&r);
-            if (id) { r.nativeId = id; g_profile.rule[g_profile.ruleCount++] = r; SaveActive(); ModernMain_RefreshRules(&g_profile); }
+            if (id) { r.nativeId = id; g_profile.rule[g_profile.ruleCount++] = r; SaveActive(); ModernMain_RefreshRules(&g_profile); OverlayDispatcher_SetConfig(&g_modernCfg); }
             else MessageBoxW(g_hMain, T(S_ERR_ADDRULE), APP_TITLE, MB_OK | MB_ICONERROR);
         }
         break;
@@ -567,6 +567,7 @@ static void OnModernMainAction(ModernMainAction action, int param, void* user)
             EngineEditRule(&r);
             SaveActive();
             ModernMain_RefreshRules(&g_profile);
+            OverlayDispatcher_SetConfig(&g_modernCfg);
         }
         break;
     }
@@ -578,6 +579,7 @@ static void OnModernMainAction(ModernMainAction action, int param, void* user)
         if (r->nativeId) { if (r->enabled) g_api.EnableRule(r->nativeId); else g_api.DisableRule(r->nativeId); }
         SaveActive();
         ModernMain_RefreshRules(&g_profile);
+        OverlayDispatcher_SetConfig(&g_modernCfg);
         break;
     }
     case MODERN_ACT_RULE_UP:
@@ -591,6 +593,7 @@ static void OnModernMainAction(ModernMainAction action, int param, void* user)
         if (g_profile.rule[dst].nativeId) g_api.MoveRuleToPosition(g_profile.rule[dst].nativeId, (UINT32)(dst + 1));
         SaveActive();
         ModernMain_RefreshRules(&g_profile);
+        OverlayDispatcher_SetConfig(&g_modernCfg);
         break;
     }
     case MODERN_ACT_RULE_DELETE:
@@ -601,6 +604,7 @@ static void OnModernMainAction(ModernMainAction action, int param, void* user)
         g_profile.ruleCount--;
         SaveActive();
         ModernMain_RefreshRules(&g_profile);
+        OverlayDispatcher_SetConfig(&g_modernCfg);
         break;
     }
     }
@@ -1321,7 +1325,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         {
         case IDC_FLOWS_CLEAR:    FlowsClearClosed(); return 0;
         case IDM_PROXY_SETTINGS: DialogBoxW(g_hInst, MAKEINTRESOURCEW(IDD_SERVERS), hwnd, ServersDlgProc); ModernMain_RefreshRules(&g_profile); return 0;
-        case IDM_PROXY_RULES:    DialogBoxW(g_hInst, MAKEINTRESOURCEW(IDD_RULES),   hwnd, RulesDlgProc);   ModernMain_RefreshRules(&g_profile); return 0;
+        case IDM_PROXY_RULES:    DialogBoxW(g_hInst, MAKEINTRESOURCEW(IDD_RULES),   hwnd, RulesDlgProc);   ModernMain_RefreshRules(&g_profile); OverlayDispatcher_SetConfig(&g_modernCfg); return 0;
         case IDM_PROXY_ENABLE:
             g_proxyEnabled = !g_proxyEnabled;
             g_api.SetEnabled(g_proxyEnabled);

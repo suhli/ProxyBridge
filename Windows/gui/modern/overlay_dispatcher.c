@@ -32,6 +32,12 @@ static void ArbitrateForTarget(HWND targetHwnd, DWORD fgPid, const ModernAppTraf
         return;
     }
 
+    // Do not display OSD / RTSS for applications not matched by any enabled PROXY rule.
+    if (!StatsManager_IsAppInProxyRules(app->appName, NULL, 0)) {
+        DisableAllChannels();
+        return;
+    }
+
     // Channel A: RTSS SharedMemoryV2 (DirectX / Vulkan / OpenGL fullscreen & 3D apps)
     if (g_dispCfg.rtssEnabled && RtssProvider_IsPidHooked(fgPid)) {
         WindowOsd_Hide(); // Guarantee zero dual-layer ghosting

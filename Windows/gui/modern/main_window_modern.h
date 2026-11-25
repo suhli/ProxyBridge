@@ -72,8 +72,9 @@ void ModernMain_PaintMenuPillDC(HDC hdc, const RECT *rc, BOOL hot, BOOL dimmed);
 void ModernMain_PaintActiveBodyCards(HDC hdc, const RECT *tab2SearchCard, BOOL searchVisible,
                                      BOOL searchFocused, const RECT *tab2LogCard);
 
-// Rule-name resolver helper for StatsManager_SetRuleResolver
-void ModernMain_ResolveRuleForApp(const PBProfile *profile, const wchar_t *appName,
+// Rule-name resolver helper for StatsManager_SetRuleResolver.
+// Returns TRUE iff appName is matched by an enabled PROXY rule (respecting top-down precedence).
+BOOL ModernMain_ResolveRuleForApp(const PBProfile *profile, const wchar_t *appName,
                                   wchar_t *ruleOut, size_t ruleCch);
 
 #ifdef __cplusplus
