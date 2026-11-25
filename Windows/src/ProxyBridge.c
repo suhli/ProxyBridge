@@ -94,6 +94,165 @@ DWORD  g_pidtbl_cap = 0;
 // relay (or mis-decided) - proxied apps then hang while the log still looks normal, and it
 // gets likelier the longer the ephemeral range has been cycling. Traffic to the proxy server
 // itself must never be redirected, so it is passed through before any per-port state is used.
+#define MAX_LOCAL_ADDRS 64
+#define LOCAL_ADDR_TTL_MS 5000
+#define MAX_LOCAL_BYPASS_PORTS 8
+
+static SRWLOCK g_local_addr_lock = SRWLOCK_INIT;
+static UINT32 g_local_v4[MAX_LOCAL_ADDRS];
+static int    g_local_v4_count = 0;
+static UINT8  g_local_v6[MAX_LOCAL_ADDRS][16];
+static int    g_local_v6_count = 0;
+static ULONGLONG g_local_addr_tick = 0;
+// Fixed-size atomic port slots so packet hot paths stay lock-free.
+static volatile LONG g_local_bypass_ports[MAX_LOCAL_BYPASS_PORTS] = {0};
+
+PROXYBRIDGE_API void ProxyBridge_SetLocalBypassPorts(const UINT16 *ports, UINT32 count)
+{
+    UINT32 written = 0;
+    if (ports != NULL)
+    {
+        for (UINT32 i = 0; i < count && written < MAX_LOCAL_BYPASS_PORTS; i++)
+        {
+            if (ports[i] == 0) continue;
+            BOOL dup = FALSE;
+            for (UINT32 j = 0; j < written; j++)
+            {
+                if ((UINT16)g_local_bypass_ports[j] == ports[i]) { dup = TRUE; break; }
+            }
+            if (!dup)
+                InterlockedExchange(&g_local_bypass_ports[written++], (LONG)ports[i]);
+        }
+    }
+    for (UINT32 i = written; i < MAX_LOCAL_BYPASS_PORTS; i++)
+        InterlockedExchange(&g_local_bypass_ports[i], 0);
+}
+
+static void refresh_local_addrs_if_needed(BOOL force)
+{
+    ULONGLONG now = GetTickCount64();
+    if (!force && g_local_addr_tick != 0 && now - g_local_addr_tick < LOCAL_ADDR_TTL_MS)
+        return;
+
+    AcquireSRWLockExclusive(&g_local_addr_lock);
+    now = GetTickCount64();
+    if (!force && g_local_addr_tick != 0 && now - g_local_addr_tick < LOCAL_ADDR_TTL_MS)
+    {
+        ReleaseSRWLockExclusive(&g_local_addr_lock);
+        return;
+    }
+
+    ULONG flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST |
+                  GAA_FLAG_SKIP_DNS_SERVER | GAA_FLAG_SKIP_FRIENDLY_NAME;
+    ULONG buf_len = 16384;
+    PIP_ADAPTER_ADDRESSES addrs = (PIP_ADAPTER_ADDRESSES)malloc(buf_len);
+    DWORD rc = addrs != NULL ? GetAdaptersAddresses(AF_UNSPEC, flags, NULL, addrs, &buf_len) : ERROR_OUTOFMEMORY;
+    if (rc == ERROR_BUFFER_OVERFLOW && buf_len <= 512 * 1024)
+    {
+        free(addrs);
+        addrs = (PIP_ADAPTER_ADDRESSES)malloc(buf_len);
+        rc = addrs != NULL ? GetAdaptersAddresses(AF_UNSPEC, flags, NULL, addrs, &buf_len) : ERROR_OUTOFMEMORY;
+    }
+
+    if (rc == NO_ERROR && addrs != NULL)
+    {
+        int n4 = 0, n6 = 0;
+        for (PIP_ADAPTER_ADDRESSES aa = addrs; aa != NULL; aa = aa->Next)
+        {
+            for (PIP_ADAPTER_UNICAST_ADDRESS ua = aa->FirstUnicastAddress; ua != NULL; ua = ua->Next)
+            {
+                if (ua->Address.lpSockaddr == NULL) continue;
+                ADDRESS_FAMILY fam = ua->Address.lpSockaddr->sa_family;
+                if (fam == AF_INET && n4 < MAX_LOCAL_ADDRS)
+                {
+                    const struct sockaddr_in *s4 = (const struct sockaddr_in *)ua->Address.lpSockaddr;
+                    g_local_v4[n4++] = s4->sin_addr.s_addr;
+                }
+                else if (fam == AF_INET6 && n6 < MAX_LOCAL_ADDRS)
+                {
+                    const struct sockaddr_in6 *s6 = (const struct sockaddr_in6 *)ua->Address.lpSockaddr;
+                    memcpy(g_local_v6[n6++], s6->sin6_addr.u.Byte, 16);
+                }
+            }
+        }
+        g_local_v4_count = n4;
+        g_local_v6_count = n6;
+    }
+    free(addrs);
+    g_local_addr_tick = now;
+    ReleaseSRWLockExclusive(&g_local_addr_lock);
+}
+
+static BOOL is_local_unicast_v4(UINT32 ip_net)
+{
+    refresh_local_addrs_if_needed(FALSE);
+    BOOL found = FALSE;
+    AcquireSRWLockShared(&g_local_addr_lock);
+    for (int i = 0; i < g_local_v4_count; i++)
+    {
+        if (g_local_v4[i] == ip_net) { found = TRUE; break; }
+    }
+    ReleaseSRWLockShared(&g_local_addr_lock);
+    return found;
+}
+
+static BOOL is_local_unicast_v6(const UINT8 ip6[16])
+{
+    refresh_local_addrs_if_needed(FALSE);
+    BOOL found = FALSE;
+    AcquireSRWLockShared(&g_local_addr_lock);
+    for (int i = 0; i < g_local_v6_count; i++)
+    {
+        if (memcmp(g_local_v6[i], ip6, 16) == 0) { found = TRUE; break; }
+    }
+    ReleaseSRWLockShared(&g_local_addr_lock);
+    return found;
+}
+
+static BOOL is_local_proxy_port(UINT16 port_host)
+{
+    if (port_host == 0) return FALSE;
+    for (int i = 0; i < MAX_LOCAL_BYPASS_PORTS; i++)
+    {
+        LONG p = g_local_bypass_ports[i];
+        if (p != 0 && (UINT16)p == port_host)
+            return TRUE;
+    }
+    int n = g_proxy_config_count;
+    if (n > MAX_PROXY_CONFIGS) n = MAX_PROXY_CONFIGS;
+    for (int i = 0; i < n; i++)
+    {
+        const PROXY_CONFIG *c = &g_proxy_configs[i];
+        if (c->config_id != 0 && c->port == port_host && ((c->resolved_ip & 0xFF) == 127))
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static BOOL is_local_host_v4(UINT32 ip_net, BOOL is_loopback)
+{
+    if (is_loopback || (ip_net & 0xFF) == 127)
+        return TRUE;
+    return is_local_unicast_v4(ip_net);
+}
+
+static BOOL is_local_host_v6(const UINT8 ip6[16], BOOL is_loopback)
+{
+    if (is_loopback)
+        return TRUE;
+    static const UINT8 lb6[16] = {0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,1};
+    static const UINT8 v4p[12] = {0,0,0,0, 0,0,0,0, 0,0,0xff,0xff};
+    if (memcmp(ip6, lb6, 16) == 0)
+        return TRUE;
+    if (memcmp(ip6, v4p, 12) == 0)
+    {
+        UINT32 v4 = 0;
+        memcpy(&v4, ip6 + 12, 4);
+        return is_local_host_v4(v4, FALSE);
+    }
+    return is_local_unicast_v6(ip6);
+}
+
 static BOOL is_proxy_server_endpoint(UINT32 dst_ip, UINT16 dst_port)
 {
     int n = g_proxy_config_count;
@@ -105,6 +264,18 @@ static BOOL is_proxy_server_endpoint(UINT32 dst_ip, UINT16 dst_port)
             return TRUE;
     }
     return FALSE;
+}
+
+static BOOL is_proxy_server_endpoint_v4(UINT32 dst_ip, UINT16 dst_port, BOOL is_loopback)
+{
+    if (is_proxy_server_endpoint(dst_ip, dst_port))
+        return TRUE;
+    return is_local_proxy_port(dst_port) && is_local_host_v4(dst_ip, is_loopback);
+}
+
+static BOOL is_proxy_server_endpoint_v6(const UINT8 dst_ip6[16], UINT16 dst_port, BOOL is_loopback)
+{
+    return is_local_proxy_port(dst_port) && is_local_host_v6(dst_ip6, is_loopback);
 }
 
 // UDP counterpart: the datagrams between the relay and the proxy's UDP relay (SOCKS5 UDP
@@ -225,6 +396,13 @@ DWORD WINAPI packet_processor(LPVOID arg)
                         if (memcmp(ipv6_header->DstAddr, _lb6r, 16) != 0)
                             addr.Outbound = FALSE;
                         goto ipv6u_send;
+                    }
+
+                    if (is_proxy_server_endpoint_v6((const UINT8*)ipv6_header->DstAddr, dp, addr.Loopback != 0) ||
+                        (addr.Loopback != 0 && is_proxy_server_endpoint_v6((const UINT8*)ipv6_header->SrcAddr, sp, TRUE)))
+                    {
+                        WinDivertSend(windivert_handle, packet, packet_len, NULL, &addr);
+                        continue;
                     }
 
                     if (udp_flow_validate(sp, TRUE, 0, (const UINT8*)ipv6_header->DstAddr, dp))
@@ -379,6 +557,14 @@ DWORD WINAPI packet_processor(LPVOID arg)
             {
                 UINT16 sp = ntohs(tcp_header->SrcPort);
                 UINT16 dp = ntohs(tcp_header->DstPort);
+
+                if (sp != g_local_relay_port &&
+                    (is_proxy_server_endpoint_v6((const UINT8*)ipv6_header->DstAddr, dp, addr.Loopback != 0) ||
+                     (addr.Loopback != 0 && is_proxy_server_endpoint_v6((const UINT8*)ipv6_header->SrcAddr, sp, TRUE))))
+                {
+                    WinDivertSend(windivert_handle, packet, packet_len, NULL, &addr);
+                    continue;
+                }
 
                 if (tcp_header->Syn && !tcp_header->Ack)
                     reset_stale_tcp_state(sp, TRUE);
@@ -602,9 +788,11 @@ DWORD WINAPI packet_processor(LPVOID arg)
                     }
                 }
                 else if (is_proxy_udp_endpoint(ip_header->DstAddr, ntohs(udp_header->DstPort)) ||
-                         is_proxy_udp_endpoint(ip_header->SrcAddr, ntohs(udp_header->SrcPort)))
+                         is_proxy_udp_endpoint(ip_header->SrcAddr, ntohs(udp_header->SrcPort)) ||
+                         is_proxy_server_endpoint_v4(ip_header->DstAddr, ntohs(udp_header->DstPort), addr.Loopback != 0) ||
+                         (addr.Loopback != 0 && is_proxy_server_endpoint_v4(ip_header->SrcAddr, ntohs(udp_header->SrcPort), TRUE)))
                 {
-                    // relay <-> proxy UDP relay traffic: never redirect or evaluate
+                    // relay <-> proxy UDP relay traffic or local proxy port: never redirect or evaluate
                     WinDivertSend(windivert_handle, packet, packet_len, NULL, &addr);
                     continue;
                 }
@@ -795,9 +983,10 @@ DWORD WINAPI packet_processor(LPVOID arg)
             {
                 UINT16 sp = ntohs(tcp_header->SrcPort);
 
-                // Traffic to the proxy server itself (the relay's upstream sockets): never touch.
+                // Traffic to the proxy server itself (the relay's upstream sockets or local proxy port): never touch.
                 if (sp != g_local_relay_port &&
-                    is_proxy_server_endpoint(ip_header->DstAddr, ntohs(tcp_header->DstPort)))
+                    (is_proxy_server_endpoint_v4(ip_header->DstAddr, ntohs(tcp_header->DstPort), addr.Loopback != 0) ||
+                     (addr.Loopback != 0 && is_proxy_server_endpoint_v4(ip_header->SrcAddr, sp, TRUE))))
                 {
                     WinDivertSend(windivert_handle, packet, packet_len, NULL, &addr);
                     continue;
@@ -1224,6 +1413,7 @@ PROXYBRIDGE_API BOOL ProxyBridge_Start(void)
         return FALSE;
 
     InitializeSRWLock(&lock);
+    refresh_local_addrs_if_needed(TRUE);
     dns_cache_init();
     udp_direct_reset();
 

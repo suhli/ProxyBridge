@@ -84,6 +84,7 @@ PROXYBRIDGE_API BOOL ProxyBridge_ReplaceApplicationRules(const PB_APPLICATION_RU
 PROXYBRIDGE_API BOOL ProxyBridge_GetApplicationStats(const UINT32 *ids, PB_APPLICATION_STATS *out, UINT32 count);
 PROXYBRIDGE_API BOOL ProxyBridge_MatchesProcess(const char *pattern, const char *image);
 PROXYBRIDGE_API BOOL ProxyBridge_ApplicationRunning(void);
+PROXYBRIDGE_API void ProxyBridge_SetLocalBypassPorts(const UINT16 *ports, UINT32 count);
 
 // Live connections: the flows ProxyBridge is relaying right now (proxied TCP connections and proxied UDP flows).
 // Direct and blocked traffic is not part of it - the engine never sees its data.
